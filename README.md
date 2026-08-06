@@ -5,6 +5,27 @@ Centraliza la integración de bajo nivel con ARCA (WSAA + WSFE, vía `@arcasdk/c
 contrato REST simple, con autenticación por API key, idempotencia y numeración segura de
 comprobantes por tenant.
 
+## Qué hace
+
+Es un backend que varios sistemas (POS, e-commerce, formularios web), cada uno con su propia
+autenticación, pueden usar para emitir facturas electrónicas sin tener que integrar ellos mismos
+contra los web services de ARCA. Por cada request a `POST /v1/facturas`:
+
+1. Resuelve qué tenant (comercio) está haciendo la request a partir de su API key.
+2. Valida el body (cliente, items, total) con Zod.
+3. Aplica las reglas fiscales del tenant (`resolverComprobante`) para determinar el tipo de
+   comprobante correcto — hoy soporta **Monotributo → Consumidor Final → Factura C**, con la
+   lógica preparada para sumar Responsable Inscripto (Factura A/B) y Exento sin reescribirla.
+4. Asigna el próximo número de comprobante para ese tenant/punto de venta de forma segura ante
+   concurrencia (`SELECT ... FOR UPDATE` dentro de una transacción).
+5. Llama a ARCA (WSAA + WSFE) a través del wrapper interno de `@arcasdk/core` — ningún consumidor
+   externo de la API sabe que ese SDK existe.
+6. Persiste la factura con su CAE y devuelve el resultado.
+
+Si la misma request se reintenta con el mismo header `Idempotency-Key`, se devuelve la factura ya
+creada en vez de reprocesarla contra ARCA. Los datos de cada tenant (facturas, contadores,
+certificados) están completamente aislados entre sí.
+
 ## Stack
 
 - Node.js 20+, TypeScript estricto
