@@ -1,3 +1,9 @@
+/**
+ * Rutas públicas `/v1/facturas`. Todas pasan por `authMiddleware`, que
+ * resuelve el tenant a partir de la API key y lo deja en `request.tenant` —
+ * los handlers nunca reciben ni confían en un `tenantId` que venga del
+ * body/query del cliente.
+ */
 import type { FastifyInstance } from 'fastify';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
@@ -15,6 +21,7 @@ import { createFactura, getFacturaById, listFacturas } from './service.js';
 
 export * from './schemas.js';
 
+/** Traduce la fila de DB (camelCase) al contrato público de la API (snake_case, ver prompt/README). */
 function formatFacturaResponse(factura: {
   id: string;
   cae: string | null;
@@ -52,12 +59,17 @@ export async function registerFacturaRoutes(app: FastifyInstance): Promise<void>
     handler: async (request, reply) => {
       const idempotencyKey = request.headers['idempotency-key'];
 
+      // El schema de headers ya exige el valor; este chequeo es una
+      // segunda barrera explícita (y es lo que usa el service para decidir
+      // 200 vs 201) antes de tocar la base de datos.
       if (!isIdempotencyKeyValid(idempotencyKey)) {
         throw new ValidationError('Idempotency-Key header is required');
       }
 
       const { factura, isNew } = await createFactura(request.tenant, request.body, idempotencyKey);
 
+      // Un reintento con el mismo Idempotency-Key devuelve la factura
+      // existente con 200, no 201 (no se creó nada nuevo en esta request).
       const statusCode = isNew ? 201 : 200;
 
       return reply.status(statusCode).send(formatFacturaResponse(factura));

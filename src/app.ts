@@ -1,3 +1,10 @@
+/**
+ * Construye la instancia de Fastify: plugins (rate limit, OpenAPI),
+ * proveedor de validación Zod y el error handler global. Separado de
+ * `index.ts` (que solo hace `listen`) para poder importar `buildApp` desde
+ * los tests de integración sin levantar un socket TCP real (usan
+ * `app.inject`).
+ */
 import Fastify from 'fastify';
 import {
   serializerCompiler,
@@ -27,6 +34,12 @@ export async function buildApp() {
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
+  // Nota: el rate limit corre como plugin global, antes de que
+  // `authMiddleware` (hook por-ruta) resuelva el tenant — a esta altura
+  // todavía no sabemos qué tenant es. Cae a IP como key. Si se necesita
+  // limitar estrictamente por tenant, hay que resolver la API key acá
+  // también (duplicando el lookup de auth) o mover el rate limit a un hook
+  // que corra después de la autenticación.
   await app.register(fastifyRateLimit, {
     max: env.RATE_LIMIT_MAX,
     timeWindow: env.RATE_LIMIT_TIME_WINDOW,
@@ -60,6 +73,10 @@ export async function buildApp() {
     routePrefix: '/docs',
   });
 
+  // Handler global: todo error de dominio (`AppError`) y de validación
+  // (Zod o el validador nativo de Fastify) se traduce acá al formato único
+  // `{ error: { code, message, details } }`; nunca se filtra un stack trace
+  // ni un mensaje interno al cliente.
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof AppError) {
       return reply.status(error.statusCode).send(error.toJSON());

@@ -2,6 +2,12 @@ import { pgTable, uuid, varchar, text, timestamp, integer, jsonb, uniqueIndex } 
 import { tenants } from './tenants.js';
 import { estadoFacturaEnum } from './enums.js';
 
+/**
+ * `cae`/`vencimientoCae`/`numero` quedan null mientras `estado` es
+ * 'pendiente' o si terminó 'rechazada'. El índice único
+ * `(tenantId, idempotencyKey)` es la garantía real de "una sola vez" del
+ * `Idempotency-Key` — `services/idempotency` solo hace el lookup previo.
+ */
 export const facturas = pgTable('facturas', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),

@@ -1,3 +1,4 @@
+/** Formas de request/response propias de nuestro dominio (camelCase), independientes del SDK de ARCA. */
 export interface ArcaCredentials {
   cert: string;
   key: string;

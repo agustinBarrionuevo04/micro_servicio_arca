@@ -1,3 +1,9 @@
+/**
+ * Errores de dominio tipados. El handler global de Fastify (`app.ts`)
+ * atrapa cualquier `AppError` y responde con `toJSON()` + `statusCode`,
+ * así que cada subclase nueva solo necesita definir su `code`/status/HTTP —
+ * no hace falta tocar el handler para que se traduzca correctamente.
+ */
 export class AppError extends Error {
   constructor(
     public readonly code: string,

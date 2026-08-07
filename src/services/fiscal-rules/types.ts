@@ -1,3 +1,9 @@
+/**
+ * Tipos y catálogos del dominio fiscal. Los valores numéricos de
+ * CBTE_TIPO/DOC_TIPO/CONCEPTO/CONDICION_IVA_RECEPTOR son códigos fijos
+ * definidos por la especificación de WSFE (no elegimos nosotros esos
+ * números, los exige ARCA).
+ */
 import { z } from 'zod';
 import type { CondicionFiscal } from '../../db/schema/index.js';
 
@@ -23,12 +29,14 @@ export const ventaInputSchema = z.object({
 });
 export type VentaInput = z.infer<typeof ventaInputSchema>;
 
+/** Subconjunto del tenant que necesita `resolverComprobante` (no todo el registro de DB). */
 export interface TenantFiscal {
   cuit: string;
   condicionFiscal: CondicionFiscal;
   puntoVenta: number;
 }
 
+/** Comprobante ya resuelto, listo para completarse con numeración/fecha y enviarse a ARCA. */
 export interface ComprobantePayload {
   cbteTipo: number;
   ptoVta: number;

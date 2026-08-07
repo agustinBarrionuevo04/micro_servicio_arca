@@ -1,3 +1,8 @@
+/**
+ * Endpoint interno de administración (`/admin/tenants`) — no forma parte de
+ * la API pública v1 ni requiere API key, es para provisionar tenants nuevos
+ * (uso operativo/scripts, no pensado para exponerse a clientes).
+ */
 import type { FastifyInstance } from 'fastify';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { db } from '../../db/index.js';
@@ -27,6 +32,8 @@ export async function registerTenantRoutes(app: FastifyInstance): Promise<void> 
       const encryptedCert = encrypt(input.cert);
       const encryptedKey = encrypt(input.key);
 
+      // La API key en texto plano solo vive en esta variable y en la
+      // response; en DB únicamente se guarda `hashedApiKey`.
       const plainApiKey = generateApiKey();
       const hashedApiKey = await hashApiKey(plainApiKey);
 
@@ -51,6 +58,12 @@ export async function registerTenantRoutes(app: FastifyInstance): Promise<void> 
           activa: true,
         });
 
+        // Sembramos el contador en 0 para que la primera factura del tenant
+        // no tenga que crear la fila sobre la marcha dentro de la
+        // transacción de facturación. Fijo en FACTURA_C porque hoy
+        // `resolverComprobante` solo emite ese tipo (ver services/fiscal-rules);
+        // el día que se sume Responsable Inscripto hay que sembrar también
+        // el contador de Factura A/B acá.
         await tx.insert(contadores).values({
           tenantId: tenant.id,
           ptoVta: input.puntoVenta,

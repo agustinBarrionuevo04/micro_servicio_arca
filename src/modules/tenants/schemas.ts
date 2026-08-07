@@ -1,3 +1,4 @@
+/** Contratos Zod del endpoint interno `POST /admin/tenants`. */
 import { z } from 'zod';
 
 export const createTenantSchema = z.object({

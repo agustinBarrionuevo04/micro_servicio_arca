@@ -1,6 +1,7 @@
 import { pgTable, uuid, varchar, text, timestamp, integer } from 'drizzle-orm/pg-core';
 import { condicionFiscalEnum } from './enums.js';
 
+/** Un comercio/cliente de la API. `cert`/`key` viajan cifrados (AES-256-GCM, ver config/crypto.ts), nunca en texto plano. */
 export const tenants = pgTable('tenants', {
   id: uuid('id').primaryKey().defaultRandom(),
   razonSocial: varchar('razon_social', { length: 255 }).notNull(),

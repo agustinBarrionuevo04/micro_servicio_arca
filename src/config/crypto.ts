@@ -1,3 +1,13 @@
+/**
+ * Cifrado at-rest de `cert`/`key` de cada tenant (AES-256-GCM), con la clave
+ * de aplicación tomada de `ENCRYPTION_KEY` — nunca hardcodeada ni derivada
+ * del contenido a cifrar.
+ *
+ * `encrypt` empaqueta todo lo necesario para poder desencriptar después en
+ * un solo string: `iv (16 bytes) + auth tag (16 bytes) + ciphertext`,
+ * codificado en base64. `decrypt` deshace ese mismo layout. Si cambia el
+ * layout acá, hay que migrar todos los `cert`/`key` ya cifrados en DB.
+ */
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 import { env } from './env.js';
 

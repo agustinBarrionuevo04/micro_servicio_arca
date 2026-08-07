@@ -1,15 +1,22 @@
+/**
+ * Orquesta la creación de una factura: idempotencia → reglas fiscales →
+ * numeración segura → llamada a ARCA → persistencia. Es el módulo que le da
+ * uso real a `services/fiscal-rules`, `services/idempotency` y
+ * `services/arca` juntos.
+ */
 import { eq, and, sql, gte, lte, count } from 'drizzle-orm';
 import { db, type Database, type Transaction } from '../../db/index.js';
 import { facturas, contadores, type Tenant, type Factura, type EstadoFactura } from '../../db/schema/index.js';
 import { decrypt } from '../../config/crypto.js';
-import { getArcaClientForTenant, type ArcaFacturaRequest } from '../../services/arca/index.js';
-import { resolverComprobante, type VentaInput, type ClienteInput, type ComprobantePayload } from '../../services/fiscal-rules/index.js';
+import { getArcaClientForTenant, type ArcaFacturaRequest, type ArcaCredentials } from '../../services/arca/index.js';
+import { resolverComprobante, type VentaInput, type ClienteInput } from '../../services/fiscal-rules/index.js';
 import { createIdempotencyService } from '../../services/idempotency/index.js';
 import { FacturaNotFoundError, ArcaRejectionError } from '../../errors/index.js';
 import type { CreateFacturaBody } from './schemas.js';
 
 export interface CreateFacturaResult {
   factura: Factura;
+  /** false si vino de un reintento con el mismo Idempotency-Key (la ruta usa esto para responder 200 en vez de 201). */
   isNew: boolean;
 }
 
@@ -26,6 +33,39 @@ function formatNumero(ptoVta: number, cbteNro: number): string {
   return `${pto}-${nro}`;
 }
 
+function toVentaInput(body: CreateFacturaBody): VentaInput {
+  return {
+    items: body.items.map((item) => ({
+      descripcion: item.descripcion,
+      cantidad: item.cantidad,
+      precioUnitario: item.precio_unitario,
+    })),
+    total: body.total,
+  };
+}
+
+function toClienteInput(body: CreateFacturaBody): ClienteInput {
+  return {
+    tipoDoc: body.cliente.tipo_doc,
+    nroDoc: body.cliente.nro_doc,
+  };
+}
+
+function toArcaCredentials(tenant: Tenant): ArcaCredentials {
+  return {
+    cert: decrypt(tenant.cert),
+    key: decrypt(tenant.key),
+    cuit: tenant.cuit.replace(/-/g, ''),
+  };
+}
+
+/**
+ * Toma y devuelve el próximo número de comprobante para
+ * `(tenant, punto de venta, tipo de comprobante)`. El `SELECT ... FOR
+ * UPDATE` bloquea la fila del contador hasta que la transacción termina, así
+ * que dos requests concurrentes del mismo tenant se serializan acá en vez
+ * de pisarse el número — es lo que garantiza el test de concurrencia.
+ */
 async function getNextNumero(
   tx: Transaction,
   tenantId: string,
@@ -61,6 +101,25 @@ async function getNextNumero(
   return next;
 }
 
+/** Reversa un número tomado por `getNextNumero` cuando ARCA rechaza el comprobante (evita huecos innecesarios en la numeración). */
+async function decrementNumero(
+  tx: Transaction,
+  tenantId: string,
+  ptoVta: number,
+  cbteTipo: number
+): Promise<void> {
+  await tx
+    .update(contadores)
+    .set({ ultimoNumero: sql`${contadores.ultimoNumero} - 1` })
+    .where(
+      and(
+        eq(contadores.tenantId, tenantId),
+        eq(contadores.ptoVta, ptoVta),
+        eq(contadores.cbteTipo, cbteTipo)
+      )
+    );
+}
+
 export async function createFactura(
   tenant: Tenant,
   body: CreateFacturaBody,
@@ -72,39 +131,26 @@ export async function createFactura(
     return { factura: existing, isNew: false };
   }
 
-  const ventaInput: VentaInput = {
-    items: body.items.map((item) => ({
-      descripcion: item.descripcion,
-      cantidad: item.cantidad,
-      precioUnitario: item.precio_unitario,
-    })),
-    total: body.total,
-  };
-
-  const clienteInput: ClienteInput = {
-    tipoDoc: body.cliente.tipo_doc,
-    nroDoc: body.cliente.nro_doc,
-  };
-
   const comprobante = resolverComprobante(
-    {
-      cuit: tenant.cuit,
-      condicionFiscal: tenant.condicionFiscal,
-      puntoVenta: tenant.puntoVenta,
-    },
-    ventaInput,
-    clienteInput
+    { cuit: tenant.cuit, condicionFiscal: tenant.condicionFiscal, puntoVenta: tenant.puntoVenta },
+    toVentaInput(body),
+    toClienteInput(body)
   );
 
-  const decryptedCert = decrypt(tenant.cert);
-  const decryptedKey = decrypt(tenant.key);
+  const arcaClient = await getArcaClientForTenant(tenant.id, toArcaCredentials(tenant));
 
-  const arcaClient = await getArcaClientForTenant(tenant.id, {
-    cert: decryptedCert,
-    key: decryptedKey,
-    cuit: tenant.cuit.replace(/-/g, ''),
-  });
-
+  // Estrategia de la transacción: tomamos número + insertamos "pendiente",
+  // después llamamos a ARCA (una llamada de red, adentro de la transacción
+  // porque necesitamos el número reservado antes de poder pedirle el CAE).
+  // - Si ARCA aprueba o tira un error que no es un rechazo explícito
+  //   (de red, interno): dejamos que la excepción salga y todo hace
+  //   rollback — nada queda a medio persistir, el cliente puede reintentar
+  //   con el mismo Idempotency-Key sin duplicar nada.
+  // - Si ARCA rechaza explícitamente (`ArcaRejectionError`): SÍ queremos
+  //   dejar constancia del rechazo, así que atrapamos el error adentro,
+  //   marcamos la factura 'rechazada', liberamos el número reservado, y
+  //   recién después de que la transacción hace commit relanzamos el error
+  //   para que la ruta responda 422.
   const { factura, rejection } = await db.transaction(async (tx) => {
     const cbteNro = await getNextNumero(tx, tenant.id, comprobante.ptoVta, comprobante.cbteTipo);
 
@@ -145,9 +191,6 @@ export async function createFactura(
 
       return { factura: updatedFactura!, rejection: null };
     } catch (error) {
-      // Solo confirmamos (commit) el estado 'rechazada' cuando ARCA
-      // explícitamente rechazó el comprobante; otros errores (de red,
-      // internos) hacen rollback para permitir un reintento seguro.
       if (!(error instanceof ArcaRejectionError)) {
         throw error;
       }
@@ -156,24 +199,12 @@ export async function createFactura(
         .update(facturas)
         .set({
           estado: 'rechazada',
-          respuestaArca: {
-            message: error.message,
-            details: error.details,
-          },
+          respuestaArca: { message: error.message, details: error.details },
         })
         .where(eq(facturas.id, pendingFactura.id))
         .returning();
 
-      await tx
-        .update(contadores)
-        .set({ ultimoNumero: sql`${contadores.ultimoNumero} - 1` })
-        .where(
-          and(
-            eq(contadores.tenantId, tenant.id),
-            eq(contadores.ptoVta, comprobante.ptoVta),
-            eq(contadores.cbteTipo, comprobante.cbteTipo)
-          )
-        );
+      await decrementNumero(tx, tenant.id, comprobante.ptoVta, comprobante.cbteTipo);
 
       return { factura: rejectedFactura!, rejection: error };
     }
@@ -186,6 +217,7 @@ export async function createFactura(
   return { factura, isNew: true };
 }
 
+/** El filtro por `tenantId` (no solo `facturaId`) es lo que garantiza el aislamiento entre tenants: un id ajeno da 404, nunca 403. */
 export async function getFacturaById(tenantId: string, facturaId: string): Promise<Factura> {
   const [factura] = await db
     .select()

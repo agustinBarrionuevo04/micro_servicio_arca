@@ -1,3 +1,4 @@
+/** Entry point del proceso: arma la app (`app.ts`) y la pone a escuchar. Separado de `app.ts` para que los tests puedan importar `buildApp` sin abrir un puerto. */
 import { env } from './config/env.js';
 import { buildApp } from './app.js';
 

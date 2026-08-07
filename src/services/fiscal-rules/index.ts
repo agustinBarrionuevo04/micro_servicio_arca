@@ -1,3 +1,13 @@
+/**
+ * Reglas fiscales: a partir de un tenant, una venta y un cliente, decide qué
+ * comprobante hay que emitirle a ARCA (tipo, IVA, importes). Es el único lugar
+ * del proyecto que sabe traducir "condición fiscal del tenant" a un payload
+ * de ARCA — no toca red ni DB, así que se testea con inputs puros.
+ *
+ * Para agregar una condición fiscal nueva (Responsable Inscripto, Exento):
+ * sumar un caso al switch de `resolverComprobante` y su función
+ * `resolveComprobante*` correspondiente, sin tocar las demás.
+ */
 import { ValidationError } from '../../errors/index.js';
 import {
   type TenantFiscal,
@@ -13,6 +23,7 @@ import {
 
 export * from './types.js';
 
+/** Traduce nuestro enum de documento al código numérico que espera ARCA. */
 function mapTipoDocumento(tipoDoc: TipoDocumento): number {
   const mapping: Record<TipoDocumento, number> = {
     CUIT: DOC_TIPO.CUIT,
@@ -23,6 +34,12 @@ function mapTipoDocumento(tipoDoc: TipoDocumento): number {
   return mapping[tipoDoc];
 }
 
+/**
+ * Valida invariantes de negocio que Zod no puede expresar: que haya al menos
+ * un item y que el total declarado coincida con la suma de sus líneas.
+ * Redondeamos a centavos antes de comparar para no rechazar por errores de
+ * punto flotante (ej. 0.1 + 0.2 !== 0.3).
+ */
 function validateVenta(venta: VentaInput): void {
   if (venta.items.length === 0) {
     throw new ValidationError('La venta debe tener al menos un item');
@@ -44,6 +61,10 @@ function validateVenta(venta: VentaInput): void {
   }
 }
 
+/**
+ * Monotributo + Consumidor Final siempre es Factura C sin discriminar IVA:
+ * el importe neto es igual al total y no hay impuestos ni exento que restar.
+ */
 function resolveComprobanteMonotributo(
   tenant: TenantFiscal,
   venta: VentaInput,
@@ -89,6 +110,13 @@ function resolveComprobanteExento(
   );
 }
 
+/**
+ * Punto de entrada del módulo: valida la venta y despacha según la condición
+ * fiscal del tenant. El branch `default` es inalcanzable en tiempo de
+ * ejecución (el switch cubre todo `CondicionFiscal`) pero el chequeo
+ * `never` hace que TypeScript rompa el build si se agrega un valor al enum
+ * sin sumar su caso acá.
+ */
 export function resolverComprobante(
   tenant: TenantFiscal,
   venta: VentaInput,

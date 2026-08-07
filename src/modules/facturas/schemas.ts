@@ -1,5 +1,6 @@
+/** Contratos Zod de `/v1/facturas` (request/response en snake_case, el contrato público). Alimentan tanto la validación en runtime como el OpenAPI generado en `/docs`. */
 import { z } from 'zod';
-import { tipoDocumentoSchema, itemInputSchema } from '../../services/fiscal-rules/types.js';
+import { tipoDocumentoSchema } from '../../services/fiscal-rules/types.js';
 
 export const createFacturaBodySchema = z.object({
   cliente: z.object({

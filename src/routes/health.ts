@@ -1,3 +1,4 @@
+/** Endpoints de diagnóstico, sin autenticación: salud propia y salud de los servicios de ARCA. */
 import type { FastifyInstance } from 'fastify';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
@@ -42,6 +43,9 @@ export async function registerHealthRoutes(app: FastifyInstance): Promise<void> 
     },
     handler: async (_request, reply) => {
       try {
+        // No es un endpoint por-tenant: consulta el estado general de WSAA/WSFE
+        // (FEDummy), que no requiere autenticación real — no usamos
+        // `getArcaClientForTenant` porque no hay un tenant asociado a esta request.
         const { Arca } = await import('@arcasdk/core');
         const arca = new Arca({
           cuit: 0,
