@@ -74,16 +74,15 @@ describe('resolverComprobante - Monotributo + Consumidor Final', () => {
     expect(result.ptoVta).toBe(7);
   });
 
-  it('usa el docNro del cliente cuando se provee (aunque sea CF)', () => {
-    const clienteConDoc: ClienteInput = { tipoDoc: 'DNI', nroDoc: '30111222' };
+  it('usa docTipo/docNro de Consumidor Final (CF) sin nroDoc', () => {
     const venta: VentaInput = {
       items: [{ descripcion: 'Producto A', cantidad: 1, precioUnitario: 50 }],
       total: 50,
     };
 
-    const result = resolverComprobante(monotributoTenant, venta, clienteConDoc);
-    expect(result.docTipo).toBe(DOC_TIPO.DNI);
-    expect(result.docNro).toBe('30111222');
+    const result = resolverComprobante(monotributoTenant, venta, consumidorFinal);
+    expect(result.docTipo).toBe(DOC_TIPO.CF);
+    expect(result.docNro).toBe('0');
   });
 });
 
@@ -160,5 +159,19 @@ describe('resolverComprobante - casos de error', () => {
     expect(() => resolverComprobante(exentoTenant, venta, consumidorFinal)).toThrow(
       ValidationError
     );
+  });
+
+  it('rechaza un cliente identificado con CUIT/CUIL/DNI para tenant Monotributo (solo soporta Consumidor Final)', () => {
+    const venta: VentaInput = {
+      items: [{ descripcion: 'Producto A', cantidad: 1, precioUnitario: 100 }],
+      total: 100,
+    };
+
+    for (const tipoDoc of ['CUIT', 'CUIL', 'DNI'] as const) {
+      const clienteIdentificado: ClienteInput = { tipoDoc, nroDoc: '30111222' };
+      expect(() => resolverComprobante(monotributoTenant, venta, clienteIdentificado)).toThrow(
+        ValidationError
+      );
+    }
   });
 });

@@ -26,8 +26,11 @@ export const facturaResponseSchema = z.object({
 });
 
 export const facturaListQuerySchema = z.object({
-  desde: z.string().optional(),
-  hasta: z.string().optional(),
+  // z.coerce.date() rechaza fechas inválidas acá (400 vía el ZodError
+  // handler de app.ts) en vez de dejar pasar cualquier string y romper
+  // más abajo, en la query de Drizzle, con un Invalid Date.
+  desde: z.coerce.date().optional(),
+  hasta: z.coerce.date().optional(),
   estado: z.enum(['pendiente', 'aprobada', 'rechazada']).optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),

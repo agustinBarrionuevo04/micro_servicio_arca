@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { arcaMockFns, resetArcaMock, mockArcaRejection } from './arca-mock.js';
 
 vi.mock('@arcasdk/core', () => ({
@@ -309,5 +309,98 @@ describe('CBTE_TIPO', () => {
       .from(facturas)
       .where(eq(facturas.tenantId, tenant.tenantId));
     expect(persisted?.cbteTipo).toBe(CBTE_TIPO.FACTURA_C);
+  });
+});
+
+describe('Contador — upsert sin fila preexistente', () => {
+  it('asigna el número 1 aunque la fila de contadores no exista de antemano', async () => {
+    const tenant = await createTestTenant(app);
+
+    // POST /admin/tenants ya siembra la fila del contador; la borramos para
+    // simular el caso que rompía antes del fix (contador ausente).
+    await db
+      .delete(contadores)
+      .where(
+        and(
+          eq(contadores.tenantId, tenant.tenantId),
+          eq(contadores.ptoVta, tenant.puntoVenta),
+          eq(contadores.cbteTipo, CBTE_TIPO.FACTURA_C)
+        )
+      );
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/facturas',
+      headers: {
+        authorization: `Bearer ${tenant.apiKey}`,
+        'idempotency-key': 'sin-contador-previo',
+      },
+      payload: validFacturaPayload(),
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().numero).toBe('0001-00000001');
+
+    const [contador] = await db
+      .select()
+      .from(contadores)
+      .where(eq(contadores.tenantId, tenant.tenantId));
+    expect(contador?.ultimoNumero).toBe(1);
+  });
+});
+
+describe('POST /v1/facturas - carrera de idempotencia', () => {
+  it('dos requests concurrentes con la misma Idempotency-Key nunca devuelven 500 y solo persisten una factura', async () => {
+    const tenant = await createTestTenant(app);
+
+    const [r1, r2] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: '/v1/facturas',
+        headers: {
+          authorization: `Bearer ${tenant.apiKey}`,
+          'idempotency-key': 'race-key',
+        },
+        payload: validFacturaPayload(),
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/v1/facturas',
+        headers: {
+          authorization: `Bearer ${tenant.apiKey}`,
+          'idempotency-key': 'race-key',
+        },
+        payload: validFacturaPayload(),
+      }),
+    ]);
+
+    for (const response of [r1, r2]) {
+      expect(response.statusCode).not.toBe(500);
+      expect([200, 201, 409]).toContain(response.statusCode);
+      if (response.statusCode === 409) {
+        expect(response.json().error.code).toBe('DUPLICATE_IDEMPOTENCY_KEY');
+      }
+    }
+
+    const persisted = await db
+      .select()
+      .from(facturas)
+      .where(eq(facturas.tenantId, tenant.tenantId));
+    expect(persisted).toHaveLength(1);
+  });
+});
+
+describe('GET /v1/facturas - validación de query params', () => {
+  it('devuelve 400 si "desde" no es una fecha válida', async () => {
+    const tenant = await createTestTenant(app);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/v1/facturas?desde=not-a-date',
+      headers: { authorization: `Bearer ${tenant.apiKey}` },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe('VALIDATION_ERROR');
   });
 });

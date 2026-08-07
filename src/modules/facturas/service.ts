@@ -11,13 +11,34 @@ import { decrypt } from '../../config/crypto.js';
 import { getArcaClientForTenant, type ArcaFacturaRequest, type ArcaCredentials } from '../../services/arca/index.js';
 import { resolverComprobante, type VentaInput, type ClienteInput } from '../../services/fiscal-rules/index.js';
 import { createIdempotencyService } from '../../services/idempotency/index.js';
-import { FacturaNotFoundError, ArcaRejectionError } from '../../errors/index.js';
+import { FacturaNotFoundError, ArcaRejectionError, DuplicateIdempotencyKeyError } from '../../errors/index.js';
 import type { CreateFacturaBody } from './schemas.js';
 
 export interface CreateFacturaResult {
   factura: Factura;
   /** false si vino de un reintento con el mismo Idempotency-Key (la ruta usa esto para responder 200 en vez de 201). */
   isNew: boolean;
+}
+
+/**
+ * Código de error de Postgres para violación de constraint único
+ * (23505 = unique_violation). Drizzle envuelve el error real del driver
+ * `pg` en un `DrizzleQueryError` cuyo `.code` es `undefined` — el código
+ * verdadero queda en `.cause.code`, así que hay que mirar ambos lugares.
+ */
+function isUniqueViolation(error: unknown): boolean {
+  return getPgErrorCode(error) === '23505';
+}
+
+function getPgErrorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const err = error as { code?: unknown; cause?: unknown };
+  if (typeof err.code === 'string') return err.code;
+  if (typeof err.cause === 'object' && err.cause !== null && 'code' in err.cause) {
+    const cause = err.cause as { code?: unknown };
+    if (typeof cause.code === 'string') return cause.code;
+  }
+  return undefined;
 }
 
 function formatDate(date: Date): string {
@@ -61,10 +82,15 @@ function toArcaCredentials(tenant: Tenant): ArcaCredentials {
 
 /**
  * Toma y devuelve el próximo número de comprobante para
- * `(tenant, punto de venta, tipo de comprobante)`. El `SELECT ... FOR
- * UPDATE` bloquea la fila del contador hasta que la transacción termina, así
- * que dos requests concurrentes del mismo tenant se serializan acá en vez
- * de pisarse el número — es lo que garantiza el test de concurrencia.
+ * `(tenant, punto de venta, tipo de comprobante)`. Usa `INSERT ... ON
+ * CONFLICT DO UPDATE` en vez de un `SELECT FOR UPDATE` + `UPDATE` separados:
+ * así es atómico y autocontenido incluso si todavía no existe la fila del
+ * contador (por ejemplo, un `cbteTipo` que `POST /admin/tenants` no
+ * sembró de antemano) — con el patrón anterior, si la fila no existía el
+ * `UPDATE` no afectaba ninguna fila y el contador quedaba trabado en 1 para
+ * siempre. El `ON CONFLICT` toma el mismo tipo de lock de fila que un
+ * `SELECT FOR UPDATE`, así que dos requests concurrentes del mismo tenant
+ * se siguen serializando acá (lo que garantiza el test de concurrencia).
  */
 async function getNextNumero(
   tx: Transaction,
@@ -73,32 +99,15 @@ async function getNextNumero(
   cbteTipo: number
 ): Promise<number> {
   const [result] = await tx
-    .select({ ultimoNumero: contadores.ultimoNumero })
-    .from(contadores)
-    .where(
-      and(
-        eq(contadores.tenantId, tenantId),
-        eq(contadores.ptoVta, ptoVta),
-        eq(contadores.cbteTipo, cbteTipo)
-      )
-    )
-    .for('update');
+    .insert(contadores)
+    .values({ tenantId, ptoVta, cbteTipo, ultimoNumero: 1 })
+    .onConflictDoUpdate({
+      target: [contadores.tenantId, contadores.ptoVta, contadores.cbteTipo],
+      set: { ultimoNumero: sql`${contadores.ultimoNumero} + 1` },
+    })
+    .returning({ ultimoNumero: contadores.ultimoNumero });
 
-  const current = result?.ultimoNumero ?? 0;
-  const next = current + 1;
-
-  await tx
-    .update(contadores)
-    .set({ ultimoNumero: next })
-    .where(
-      and(
-        eq(contadores.tenantId, tenantId),
-        eq(contadores.ptoVta, ptoVta),
-        eq(contadores.cbteTipo, cbteTipo)
-      )
-    );
-
-  return next;
+  return result!.ultimoNumero;
 }
 
 /** Reversa un número tomado por `getNextNumero` cuando ARCA rechaza el comprobante (evita huecos innecesarios en la numeración). */
@@ -142,6 +151,21 @@ export async function createFactura(
   // Estrategia de la transacción: tomamos número + insertamos "pendiente",
   // después llamamos a ARCA (una llamada de red, adentro de la transacción
   // porque necesitamos el número reservado antes de poder pedirle el CAE).
+  //
+  // Deuda técnica conocida: mantener la llamada a ARCA adentro de la
+  // transacción implica sostener el lock de fila del contador (tomado por
+  // `getNextNumero`) y una conexión del pool durante todo el round-trip de
+  // red. Si ARCA está lenta, las requests de un mismo tenant se serializan
+  // detrás de ese lock, y si el pool (máx. 10 conexiones por default) se
+  // agota, afecta a todos los tenants, no solo al que dispara la request
+  // lenta. Arreglarlo bien requiere separar esto en 3 fases (reservar
+  // número + insertar "pendiente" en una transacción corta → llamar a ARCA
+  // sin transacción abierta → confirmar el resultado en una segunda
+  // transacción corta), lo cual cambia qué pasa si un reintento llega
+  // mientras una factura quedó en 'pendiente' tras un error de red (hoy eso
+  // no puede pasar porque todo hace rollback). Queda pendiente para un pase
+  // dedicado, con sus propios tests de esa nueva semántica de reintento.
+  //
   // - Si ARCA aprueba o tira un error que no es un rechazo explícito
   //   (de red, interno): dejamos que la excepción salga y todo hace
   //   rollback — nada queda a medio persistir, el cliente puede reintentar
@@ -161,16 +185,31 @@ export async function createFactura(
       cbteHasta: cbteNro,
     };
 
-    const [pendingFactura] = await tx
-      .insert(facturas)
-      .values({
-        tenantId: tenant.id,
-        idempotencyKey,
-        cbteTipo: comprobante.cbteTipo,
-        estado: 'pendiente',
-        payloadEnviado: arcaRequest,
-      })
-      .returning();
+    // `findExisting` corrió antes de esta transacción, así que dos requests
+    // concurrentes con el mismo Idempotency-Key pueden pasar ambas ese
+    // chequeo y llegar acá. El índice único `(tenant_id, idempotency_key)`
+    // (ver db/schema/facturas.ts) es la garantía real; si el insert lo
+    // viola, es exactamente esa carrera — se lo traducimos al cliente como
+    // 409 en vez de dejar que el error crudo de Postgres llegue al handler
+    // genérico como 500.
+    let pendingFactura: Factura | undefined;
+    try {
+      [pendingFactura] = await tx
+        .insert(facturas)
+        .values({
+          tenantId: tenant.id,
+          idempotencyKey,
+          cbteTipo: comprobante.cbteTipo,
+          estado: 'pendiente',
+          payloadEnviado: arcaRequest,
+        })
+        .returning();
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        throw new DuplicateIdempotencyKeyError();
+      }
+      throw error;
+    }
 
     if (!pendingFactura) throw new Error('Failed to create factura');
 
@@ -233,8 +272,8 @@ export async function getFacturaById(tenantId: string, facturaId: string): Promi
 }
 
 export interface ListFacturasParams {
-  desde?: string | undefined;
-  hasta?: string | undefined;
+  desde?: Date | undefined;
+  hasta?: Date | undefined;
   estado?: EstadoFactura | undefined;
   page: number;
   limit: number;
@@ -247,29 +286,27 @@ export async function listFacturas(
   const conditions = [eq(facturas.tenantId, tenantId)];
 
   if (params.desde) {
-    conditions.push(gte(facturas.createdAt, new Date(params.desde)));
+    conditions.push(gte(facturas.createdAt, params.desde));
   }
   if (params.hasta) {
-    conditions.push(lte(facturas.createdAt, new Date(params.hasta)));
+    conditions.push(lte(facturas.createdAt, params.hasta));
   }
   if (params.estado) {
     conditions.push(eq(facturas.estado, params.estado));
   }
 
-  const [countResult] = await db
-    .select({ count: count() })
-    .from(facturas)
-    .where(and(...conditions));
+  // count() y el select de datos filtran por las mismas condiciones y son
+  // independientes entre sí — corren en paralelo en vez de en serie.
+  const [[countResult], data] = await Promise.all([
+    db.select({ count: count() }).from(facturas).where(and(...conditions)),
+    db
+      .select()
+      .from(facturas)
+      .where(and(...conditions))
+      .orderBy(facturas.createdAt)
+      .limit(params.limit)
+      .offset((params.page - 1) * params.limit),
+  ]);
 
-  const total = countResult?.count ?? 0;
-
-  const data = await db
-    .select()
-    .from(facturas)
-    .where(and(...conditions))
-    .orderBy(facturas.createdAt)
-    .limit(params.limit)
-    .offset((params.page - 1) * params.limit);
-
-  return { data, total };
+  return { data, total: countResult?.count ?? 0 };
 }

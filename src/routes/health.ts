@@ -2,6 +2,7 @@
 import type { FastifyInstance } from 'fastify';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import { createArcaClient } from '../services/arca/index.js';
 
 const healthResponseSchema = z.object({
   status: z.literal('ok'),
@@ -43,21 +44,15 @@ export async function registerHealthRoutes(app: FastifyInstance): Promise<void> 
     },
     handler: async (_request, reply) => {
       try {
-        // No es un endpoint por-tenant: consulta el estado general de WSAA/WSFE
-        // (FEDummy), que no requiere autenticación real — no usamos
-        // `getArcaClientForTenant` porque no hay un tenant asociado a esta request.
-        const { Arca } = await import('@arcasdk/core');
-        const arca = new Arca({
-          cuit: 0,
-          cert: '',
-          key: '',
-          production: false,
-        });
-        const status = await arca.electronicBillingService.getServerStatus();
-        return reply.send({
-          wsfe: status.appServer === 'OK' ? 'ok' : 'error',
-          wsaa: status.authServer === 'OK' ? 'ok' : 'error',
-        });
+        // No es un endpoint por-tenant: consulta el estado general de
+        // WSAA/WSFE (FEDummy), que no requiere autenticación real — no
+        // usamos `getArcaClientForTenant` porque no hay un tenant asociado
+        // a esta request. Reusamos `createArcaClient`/`getStatus` de
+        // `services/arca` (en vez de reimplementar acá la instanciación y
+        // el mapeo ok/error) para que ambos lugares no se desincronicen.
+        const arcaClient = await createArcaClient({ cuit: '0', cert: '', key: '' });
+        const status = await arcaClient.getStatus();
+        return reply.send(status);
       } catch (error) {
         return reply.send({
           wsfe: 'error',

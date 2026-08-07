@@ -64,12 +64,27 @@ function validateVenta(venta: VentaInput): void {
 /**
  * Monotributo + Consumidor Final siempre es Factura C sin discriminar IVA:
  * el importe neto es igual al total y no hay impuestos ni exento que restar.
+ *
+ * El alcance de esta función es específicamente "Consumidor Final" — si el
+ * cliente se identifica con CUIT/CUIL/DNI (un comprador real, no un
+ * consumidor final anónimo), no alcanza con mapear su tipo de documento:
+ * `condicionIvaReceptorId` también tendría que reflejar su condición real
+ * frente al IVA (RG 5616), lo cual today no está implementado. Preferimos
+ * rechazar explícitamente en vez de reportarle a ARCA "Consumidor Final"
+ * para un comprador identificado, que sería un dato fiscal incorrecto.
  */
 function resolveComprobanteMonotributo(
   tenant: TenantFiscal,
   venta: VentaInput,
   cliente: ClienteInput
 ): ComprobantePayload {
+  if (cliente.tipoDoc !== 'CF') {
+    throw new ValidationError(
+      'Monotributo solo soporta Consumidor Final (tipoDoc: "CF") en este alcance',
+      { tipoDocRecibido: cliente.tipoDoc }
+    );
+  }
+
   return {
     cbteTipo: CBTE_TIPO.FACTURA_C,
     ptoVta: tenant.puntoVenta,
