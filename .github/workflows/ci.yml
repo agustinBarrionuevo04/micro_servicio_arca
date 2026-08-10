@@ -1,0 +1,80 @@
+name: CI
+
+# Minimal objective check for PRs opened against develop/main (see PLAN.md, sección "CI" y
+# "Flujo de revisión"): agents open many PRs in parallel and reviewers need a build/test signal
+# that doesn't depend on the author's own report.
+"on":
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+# TODO once feature/monorepo-restructure lands: the backend will move to apps/api/ and this
+# workflow will need a `working-directory: apps/api` (or `pnpm --filter api <script>` from the
+# repo root, once pnpm-workspace.yaml exists). Kept intentionally simple against the current
+# flat root layout instead of guessing at the future workspace filter name.
+
+jobs:
+  build-and-test:
+    name: Lint, build and test
+    runs-on: ubuntu-latest
+
+    # Matches tests/integration/env-setup.ts defaults exactly (DATABASE_URL points at
+    # postgresql://postgres:postgres@localhost:5432/arca_billing_test). The integration tests
+    # (tests/integration/facturas.test.ts) connect to a real Postgres via drizzle + pg and run
+    # migrations themselves (helpers.ts#runMigrations) — they do NOT spin up their own container
+    # via `testcontainers` (that devDependency isn't actually imported anywhere in the repo), and
+    # they don't require docker-compose.yml to be up either; a plain Postgres reachable on
+    # localhost:5432 with this db/user/password is sufficient, confirmed by running the full
+    # suite locally against just this container.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: arca_billing_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          # pnpm-lock.yaml is lockfileVersion 9.0 (pnpm 9.x) and package.json has no
+          # "packageManager" field, so pnpm/action-setup needs an explicit version — otherwise
+          # it fails at setup time with no version to resolve.
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          # README: "Node.js 20+". package.json has no `engines` field pinning a version.
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # package.json has no "lint" script today (checked before writing this workflow) — skipping
+      # rather than inventing one. Add this step back once a lint script exists.
+      # - name: Lint
+      #   run: pnpm lint
+
+      - name: Build (typecheck)
+        run: pnpm build
+
+      # No env vars set here on purpose: tests/integration/env-setup.ts (vitest setupFiles)
+      # already defaults DATABASE_URL/ENCRYPTION_KEY/etc. to values that match this job's
+      # postgres service exactly, and that was confirmed by running the full suite locally
+      # against an equivalent container with zero env overrides.
+      - name: Test
+        run: pnpm test
