@@ -1,0 +1,10 @@
+.env
+node_modules/
+
+# material de firma/credenciales ARCA
+*.key
+*.crt
+*_csr
+*.csr
+facturate_crt.txt
+factura-te_clave_csr
