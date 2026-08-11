@@ -1,0 +1,64 @@
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: calc(var(--header-height) + var(--safe-top));
+  padding: var(--safe-top) max(var(--space-4), var(--safe-right)) 0
+    max(var(--space-4), var(--safe-left));
+  background: var(--color-primary);
+  color: var(--color-primary-contrast);
+}
+
+.app-header__brand {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+}
+
+.app-header__user {
+  font-size: var(--font-size-sm);
+  opacity: 0.8;
+}
+
+.app-main {
+  flex: 1;
+  padding: var(--space-4) max(var(--space-4), var(--safe-right))
+    calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--space-4))
+    max(var(--space-4), var(--safe-left));
+}
+
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  height: calc(var(--bottom-nav-height) + var(--safe-bottom));
+  padding-bottom: var(--safe-bottom);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+}
+
+.bottom-nav__link {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+
+.bottom-nav__link.active {
+  color: var(--color-accent);
+  font-weight: 600;
+}
