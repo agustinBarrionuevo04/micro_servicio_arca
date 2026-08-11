@@ -45,12 +45,16 @@ import {
   RESERVED_TAKEN_SIGNUP_CUIT,
   findMockFacturaByPeriodo,
   getMockFacturas,
+  mockId,
   nextMockNumero,
   saveMockFactura,
 } from './mockData';
 
 const IS_MOCK = import.meta.env.VITE_API_MOCK !== 'false';
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/v1';
+// `||` (not `??`) on purpose: an env pipeline that exports an unset var as `""` rather than
+// omitting it should still fall back to the default, not silently turn every real-mode request
+// into a same-origin relative fetch.
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/v1';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -73,13 +77,32 @@ export function setAccessToken(token: string | null): void {
 
 // -- real-mode HTTP plumbing --------------------------------------------------
 
+/** Reads `{ error: { code, message } }` off a failed response, falling back to a generic error
+ * if the body isn't JSON (e.g. an upstream proxy/502 page) — shared by both the JSON and blob
+ * request paths so a caller (like getFacturaPdf) can't end up with a real backend's specific
+ * error `code` silently downgraded to a generic one just because its response body is a PDF. */
+async function throwForErrorResponse(res: Response): Promise<never> {
+  let code = 'UNKNOWN_ERROR';
+  let message = `Error ${res.status}`;
+  try {
+    const body = (await res.json()) as { error?: { code?: string; message?: string } };
+    if (body.error) {
+      code = body.error.code ?? code;
+      message = body.error.message ?? message;
+    }
+  } catch {
+    // response body wasn't JSON — fall back to the generic message above
+  }
+  throw new ApiError(res.status, code, message);
+}
+
 async function request<T>(
   path: string,
-  init: RequestInit & { auth?: boolean } = {},
+  init: RequestInit & { auth?: boolean; responseType?: 'json' | 'blob' } = {},
 ): Promise<T> {
-  const { auth = false, headers, ...rest } = init;
+  const { auth = false, responseType = 'json', headers, ...rest } = init;
   const finalHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(rest.body ? { 'Content-Type': 'application/json' } : {}),
     ...(headers as Record<string, string> | undefined),
   };
   if (auth) {
@@ -91,35 +114,26 @@ async function request<T>(
 
   const res = await fetch(`${BASE_URL}${path}`, { ...rest, headers: finalHeaders });
 
-  if (!res.ok) {
-    let code = 'UNKNOWN_ERROR';
-    let message = `Error ${res.status}`;
-    try {
-      const body = (await res.json()) as { error?: { code?: string; message?: string } };
-      if (body.error) {
-        code = body.error.code ?? code;
-        message = body.error.message ?? message;
-      }
-    } catch {
-      // response body wasn't JSON — fall back to the generic message above
-    }
-    throw new ApiError(res.status, code, message);
-  }
+  if (!res.ok) return throwForErrorResponse(res);
 
-  return (await res.json()) as T;
+  return (responseType === 'blob' ? await res.blob() : await res.json()) as T;
 }
 
 // -- mock-mode helpers ---------------------------------------------------------
 
 /** Simulated network latency so loading states downstream get exercised realistically. */
-function mockDelay<T>(value: T, ms = 400): Promise<T> {
-  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function mockError(status: number, code: string, message: string): Promise<never> {
-  return new Promise((_resolve, reject) => {
-    setTimeout(() => reject(new ApiError(status, code, message)), 400);
-  });
+async function mockDelay<T>(value: T, ms = 400): Promise<T> {
+  await wait(ms);
+  return value;
+}
+
+async function mockError(status: number, code: string, message: string, ms = 400): Promise<never> {
+  await wait(ms);
+  throw new ApiError(status, code, message);
 }
 
 function isValidCuit(cuit: string): boolean {
@@ -193,7 +207,9 @@ export function previewFactura(body: PreviewFacturaRequest): Promise<PreviewFact
     });
   }
 
-  if (body.unidades <= 0) {
+  // `!(unidades > 0)` (not `<= 0`) so that a non-numeric `unidades` (NaN — e.g. from an empty or
+  // unparsed form field) is rejected too: `NaN <= 0` is false and would silently slip through.
+  if (!(body.unidades > 0)) {
     return mockError(422, 'VALIDATION_ERROR', 'Las unidades deben ser un número mayor a 0.');
   }
   return mockDelay({
@@ -217,14 +233,12 @@ export function createFactura(body: CreateFacturaRequest): Promise<CreateFactura
     });
   }
 
-  if (body.unidades <= 0) {
-    return mockError(422, 'VALIDATION_ERROR', 'Las unidades deben ser un número mayor a 0.');
-  }
-
+  // Idempotency check runs BEFORE validation on purpose: per api-contract.md, retrying
+  // POST /v1/facturas for an already-emitida período must return the existing invoice
+  // regardless of what the retried body happens to contain (e.g. a stale/cleared `unidades`
+  // field) — the natural key is (usuarioId, periodo), the body is only used the first time.
   const existing = findMockFacturaByPeriodo(body.periodo);
   if (existing) {
-    // Idempotent retry for an already-emitida periodo: return it as-is (api-contract.md
-    // "POST /v1/facturas").
     return mockDelay({
       id: existing.id,
       periodo: existing.periodo,
@@ -238,12 +252,16 @@ export function createFactura(body: CreateFacturaRequest): Promise<CreateFactura
     });
   }
 
+  if (!(body.unidades > 0)) {
+    return mockError(422, 'VALIDATION_ERROR', 'Las unidades deben ser un número mayor a 0.');
+  }
+
   const vencimiento = new Date();
   vencimiento.setDate(vencimiento.getDate() + 10);
   const vencimientoCae = vencimiento.toISOString().slice(0, 10).replace(/-/g, '');
 
   const factura: FacturaDetalle = {
-    id: crypto.randomUUID(),
+    id: mockId(),
     periodo: body.periodo,
     unidades: body.unidades,
     precioBaseUsado: MOCK_PRECIO_BASE_VIGENTE,
@@ -326,18 +344,7 @@ export function getFactura(id: string): Promise<FacturaDetalle> {
 
 export function getFacturaPdf(id: string): Promise<Blob> {
   if (!IS_MOCK) {
-    return (async () => {
-      if (!currentAccessToken) {
-        throw new ApiError(401, 'MISSING_ACCESS_TOKEN', 'No hay sesión activa.');
-      }
-      const res = await fetch(`${BASE_URL}/facturas/${id}/pdf`, {
-        headers: { Authorization: `Bearer ${currentAccessToken}` },
-      });
-      if (!res.ok) {
-        throw new ApiError(res.status, 'PDF_ERROR', `Error ${res.status} al generar el PDF.`);
-      }
-      return res.blob();
-    })();
+    return request<Blob>(`/facturas/${id}/pdf`, { auth: true, responseType: 'blob' });
   }
 
   const factura = getMockFacturas().find((f) => f.id === id);

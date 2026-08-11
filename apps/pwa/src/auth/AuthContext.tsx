@@ -19,6 +19,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -57,12 +58,31 @@ function readStoredSession(): StoredSession | null {
   }
 }
 
+/** Swallows quota/private-browsing errors the same way mockData.ts's writeStore does — losing
+ * persistence is fine, throwing out of a click handler and leaving the UI stuck isn't. */
+function writeStoredSession(session: StoredSession | null): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    if (session) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+    } else {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  } catch {
+    // ignore — see mockData.ts writeStore for the same tradeoff
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<StoredSession | null>(() => {
-    const stored = readStoredSession();
-    if (stored) setAccessToken(stored.accessToken);
-    return stored;
-  });
+  const [session, setSession] = useState<StoredSession | null>(() => readStoredSession());
+
+  // Registering the restored token with the API client is a side effect on module-level state
+  // outside React, so it belongs in an effect, not in the useState initializer above — React
+  // may invoke a lazy initializer more than once per commit (e.g. under <StrictMode>, used in
+  // main.tsx) without it corresponding to a committed render.
+  useEffect(() => {
+    setAccessToken(session?.accessToken ?? null);
+  }, [session]);
 
   const login = useCallback((data: LoginResponse) => {
     const next: StoredSession = {
@@ -70,14 +90,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accessToken: data.accessToken,
       refreshToken: data.refreshToken,
     };
-    setAccessToken(next.accessToken);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    writeStoredSession(next);
     setSession(next);
   }, []);
 
   const logout = useCallback(() => {
-    setAccessToken(null);
-    localStorage.removeItem(STORAGE_KEY);
+    writeStoredSession(null);
     setSession(null);
   }, []);
 

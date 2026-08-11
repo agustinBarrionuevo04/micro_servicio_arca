@@ -81,7 +81,14 @@ function readStore(): FacturaDetalle[] {
 
 function writeStore(facturas: FacturaDetalle[]): void {
   if (typeof localStorage === 'undefined') return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(facturas));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(facturas));
+  } catch {
+    // Quota exceeded / storage disabled (e.g. iOS Safari private browsing gives a 0-byte quota):
+    // the mock keeps working for the rest of this session via readStore's in-memory fallback,
+    // it just won't persist across reloads. Not worth surfacing to the caller — this is fake
+    // data, not a real save the user is trusting us with.
+  }
 }
 
 export function getMockFacturas(): FacturaDetalle[] {
@@ -99,13 +106,43 @@ export function saveMockFactura(factura: FacturaDetalle): void {
   writeStore(facturas);
 }
 
+/**
+ * Excludes `estado: 'error'` on purpose, mirroring the backend's planned partial unique index
+ * `(usuario_id, periodo) WHERE estado <> 'error'` (see PLAN.md): a rejected attempt must not
+ * block retrying the same período, so it shouldn't count as "already emitted" for idempotency.
+ * Nothing in this scaffold creates an `'error'` factura yet — feature/pwa-factura-flows is
+ * expected to exercise this path once it builds the ARCA-rejection UI.
+ */
 export function findMockFacturaByPeriodo(periodo: string): FacturaDetalle | undefined {
   return readStore().find((f) => f.periodo === periodo && f.estado !== 'error');
 }
 
+/** Starts one past the highest existing `numero` (not a count) so the seeded 121/122 don't leave a gap. */
 export function nextMockNumero(): string {
-  const count = readStore().filter((f) => f.numero).length;
-  return `0001-${String(123 + count).padStart(8, '0')}`;
+  const highest = readStore().reduce((max, f) => {
+    if (!f.numero) return max;
+    const n = Number(f.numero.split('-')[1]);
+    return Number.isFinite(n) && n > max ? n : max;
+  }, 122);
+  return `0001-${String(highest + 1).padStart(8, '0')}`;
+}
+
+/**
+ * `crypto.randomUUID()` requires a secure context (HTTPS or localhost). This is a mobile-first
+ * PWA meant to be tested from a real phone during development, typically via
+ * `http://<lan-ip>:5173`, where `crypto.randomUUID` is `undefined` — fall back to a
+ * non-cryptographic v4-shaped id, which is fine here since this is throwaway mock data, not a
+ * real secret or a real ARCA-facing identifier.
+ */
+export function mockId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'mock-xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 export function resetMockData(): void {
