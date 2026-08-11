@@ -15,13 +15,25 @@ export default defineConfig({
     // siguen evaluando contra eso, así que se sacan también (confirmado:
     // `pnpm test:coverage` fallaba ~20-35% contra un piso de 80% con
     // `include` vacío y los thresholds puestos). Las ramas que reemplazan
-    // esos módulos (feature/fiscal-rules-v2, y la idempotencia por clave
-    // natural que absorbe feature/facturas-service-v2) deben apuntar
-    // `include` a sus módulos nuevos y reinstalar `thresholds` juntos —
-    // uno sin el otro no tiene efecto real.
+    // esos módulos deben apuntar `include` a sus módulos nuevos y
+    // reinstalar `thresholds` juntos — uno sin el otro no tiene efecto real.
+    //
+    // `services/fiscal-rules` volvió con `feature/fiscal-rules-v2` (funciones
+    // puras, cobertura casi total). `services/precios-base`
+    // (`feature/precios-base-service`) se suma acá: es lookup/insert de DB,
+    // no funciones puras, pero igual queda con umbral alto porque los tests
+    // de integración cubren todos los casos límite de fecha (ver
+    // `tests/integration/precios-base.test.ts`) — la rama restante de la
+    // idempotencia natural (`facturas-service-v2`) todavía debe sumar la suya.
     coverage: {
       provider: 'v8',
-      include: [],
+      include: ['src/services/fiscal-rules/**', 'src/services/precios-base/**'],
+      thresholds: {
+        lines: 95,
+        functions: 95,
+        branches: 95,
+        statements: 95,
+      },
     },
   },
 });
