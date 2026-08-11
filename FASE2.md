@@ -71,7 +71,36 @@ corregidos y pusheados — **pendientes de que el usuario los mergee**:
 | [#2](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/2) | `feature/monorepo-restructure` | Backend movido a `apps/api/`, `apps/pwa/` placeholder, `docs/api-contract.md`, `pnpm-workspace.yaml` |
 | [#3](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/3) | `feature/pwa-scaffold` | Vite+React+vite-plugin-pwa, layout mobile-first, rutas placeholder, cliente API mockeable (`VITE_API_MOCK`) |
 | [#4](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/4) | `feature/db-schema-v2` | Schema nuevo: `usuarios`, `precios_base`, `facturas` v2, `contadores` renombrado, `api_keys` eliminado. Migración verificada contra base vacía **y** contra base con datos del esquema viejo (usa `TRUNCATE` documentado, ver el PR). Módulos incompatibles con el modelo nuevo (`modules/auth`, `modules/tenants`, `modules/facturas`, `services/fiscal-rules`, `services/idempotency`) fueron **eliminados** con TODOs explícitos para las ramas que los recrean. |
-| [#5](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/5) | `feature/fiscal-rules-v2` | `calcularComprobante(unidades, precioBase, ptoVta)`, 100% coverage. **Ojo: esta es la única de las 5 ramas de Etapa 3 completada, y NO pasó por `/code-review`** (se priorizó cerrar el presupuesto) — correr la revisión antes de mergear. |
+| [#5](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/5) | `feature/fiscal-rules-v2` | `calcularComprobante(unidades, precioBase, ptoVta)`, 100% coverage. **NO pasó por `/code-review`** (se priorizó cerrar el presupuesto de la sesión anterior) — correr la revisión antes de mergear. |
+| [#6](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/6) | `feature/precios-base-service` | `getPrecioVigente(periodo, executor?)` + `crearPrecioBase(input, executor?)`, 22 tests de integración, ~98% coverage. **Pasó por `/code-review high 6 --comment` pero los 3 hallazgos quedaron SIN aplicar** (se cortó la sesión antes) — ver detalle abajo, aplicarlos antes de mergear. |
+
+**Hallazgos de `/code-review high 6` sin aplicar en PR #6** (rama:
+`feature/precios-base-service`, worktree
+`/home/agustin/Documentos/proyectos/micro_servicio_arca/.claude/worktrees/agent-a594818f39de61106`
+si sigue existiendo; si no, basarse en `origin/feature/precios-base-service`):
+
+1. **`apps/api/src/services/precios-base/index.ts:191`** (bloqueante) —
+   `crearPrecioBase` usa `SELECT ... FOR UPDATE` para evitar rangos
+   solapados por inserts concurrentes, pero `FOR UPDATE` solo bloquea filas
+   que ya existen: no protege contra un `INSERT` fantasma concurrente (dos
+   llamadas simultáneas para la primera fila de una tabla vacía, o dos
+   rangos "abiertos" nuevos que no pisan ninguna fila ya commiteada pero sí
+   se pisan entre sí). El comentario del código afirma una garantía que en
+   realidad no cumple. `contadores` resuelve el mismo tipo de problema bien
+   con `INSERT ... ON CONFLICT DO UPDATE` (atómico) — evaluar el mismo
+   patrón acá, o al menos corregir el comentario para no afirmar una
+   garantía falsa mientras se decide el fix real.
+2. **`apps/api/scripts/seed-precio-base.ts:24`** — `parseFechaLocal` valida
+   el formato `YYYY-MM-DD` por regex pero no valida que el año/mes/día
+   formen una fecha real; `new Date(2026, 1, 30)` (30 de febrero) hace
+   rollover silencioso a 2 de marzo en vez de tirar error. Un typo de un
+   admin sembrando el precio a mano queda con una fecha de vigencia
+   incorrecta sin ningún aviso.
+3. **`apps/api/src/services/precios-base/index.ts:238`** — `input.precio.toFixed(2)`
+   puede redondear mal por el error de punto flotante estándar de IEEE-754
+   cerca de bordes `.xx5` (ej. `1.005` se guarda como `1.00` en vez de
+   `1.01`). Sin validación que lo atrape — el precio queda mal persistido en
+   silencio.
 
 **Importante sobre PR #4**: dejó `apps/api/vitest.config.ts` con
 `coverage.include: []` y sin `thresholds` (el coverage quedó desactivado a
@@ -91,19 +120,19 @@ anteriores).
 
 ### Etapa 3 — dependen solo de `feature/db-schema-v2`
 
-- ~~`feature/fiscal-rules-v2`~~ — **hecho, PR #5, falta pasar `/code-review high 5 --comment` y aplicar los hallazgos antes de mergear.**
+- ~~`feature/fiscal-rules-v2`~~ — **hecho, PR #5, falta pasar `/code-review high 5 --comment` y aplicar los hallazgos antes de mergear** (no llegó a revisarse por presupuesto).
+- ~~`feature/precios-base-service`~~ — **hecho, PR #6, YA revisado — faltan aplicar los 3 hallazgos listados arriba** ("Hallazgos de `/code-review high 6` sin aplicar") antes de mergear. El más importante es el #1 (bloqueante): la protección contra inserts concurrentes solapados no funciona como el comentario dice.
 - `feature/usuarios-auth` — login CUIT+contraseña, JWT access+refresh, tabla `refresh_tokens`, middleware de auth (reemplaza el viejo modelo de API key). No arrancó, lanzar de cero.
-- `feature/precios-base-service` — `getPrecioVigente(periodo)`, lookup por rango de fechas, validación de solapamiento al insertar. No arrancó, lanzar de cero.
 - `feature/arca-service-per-user` — `ambiente` por usuario en vez de `env.ARCA_MODE` global, con test de regresión probando aislamiento real entre dos usuarios. **Ojo**: hay que verificar leyendo el código instalado de `@arcasdk/core` cómo el flag `production` elige host WSAA/WSFEV1 — no asumir. No arrancó, lanzar de cero.
 - `feature/pdf-generation` — `@arcasdk/pdf`, `GET /v1/facturas/:id/pdf` on-demand, Dockerfile con Chromium headless. Esta rama va a necesitar un stub de auth (todavía no existe `usuarios-auth`) — documentar el gap como bloqueante para producción. No arrancó, lanzar de cero.
 
-Los prompts completos y detallados para relanzar las 4 ramas que faltan ya
-están redactados (se usaron para los dos intentos fallidos) — están en el
-historial de esta conversación si se retoma la misma sesión; si es una
-sesión nueva, `PLAN.md` tiene el resumen suficiente para reconstruirlos.
-Todas deben basarse en `origin/feature/db-schema-v2` (commit `8647f2a` o
-posterior, o `origin/develop` si ya mergeaste ese PR) — **no** en
-`feature/fiscal-rules-v2`, que es una rama hermana, no una base.
+Los prompts completos y detallados para relanzar las 3 ramas que faltan ya
+están redactados (se usaron en sesiones anteriores) — están en el historial
+de esta conversación si se retoma la misma sesión; si es una sesión nueva,
+`PLAN.md` tiene el resumen suficiente para reconstruirlos. Todas deben
+basarse en `origin/feature/db-schema-v2` (commit `8647f2a` o posterior, o
+`origin/develop` si ya mergeaste ese PR) — **no** en `feature/fiscal-rules-v2`
+ni `feature/precios-base-service`, que son ramas hermanas, no bases.
 
 ### Etapa 3b — 2 ramas en paralelo, dependen solo de `feature/pwa-scaffold`
 
@@ -126,7 +155,10 @@ posterior, o `origin/develop` si ya mergeaste ese PR) — **no** en
 
 ## Cómo retomar
 
-1. Ver si el usuario mergeó los PRs #1-#4. Si sí, actualizar `develop` local
+0. Antes que nada: aplicar los 3 hallazgos pendientes del PR #6 (arriba) y,
+   si hay presupuesto, correr `/code-review high 5 --comment` sobre el PR #5
+   (nunca se revisó). Recién después seguir con ramas nuevas.
+1. Ver si el usuario mergeó los PRs #1-#6. Si sí, actualizar `develop` local
    (`git pull origin develop`) y usarla como base de Etapa 3 en vez de
    `feature/db-schema-v2` directamente.
 2. Relanzar las 5 ramas de Etapa 3 en paralelo (isolation: worktree cada
