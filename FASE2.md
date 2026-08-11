@@ -9,9 +9,11 @@ con `PLAN.md` (el plan completo del producto) antes de seguir.
 Se llegó al ~50% del presupuesto de tokens de la sesión y se decidió frenar
 ahí en vez de seguir gastando, dejando el resto para otro día. **Etapa 3 se
 lanzó dos veces y se frenó ambas** (primero por límite de sesión del
-proveedor, después a propósito por presupuesto): ninguna de las 5 ramas de
-Etapa 3 llegó a commitear nada, así que hay que lanzarlas de cero, no
-retomarlas.
+proveedor, después a propósito por presupuesto): de las 5 ramas de Etapa 3,
+4 no llegaron a commitear nada (hay que lanzarlas de cero) y **una,
+`feature/fiscal-rules-v2`, se terminó a mano** (sin sub agente, reusando el
+trabajo que había dejado el intento cortado) con el margen de tokens que
+quedaba — ver el PR #5 en la tabla de abajo.
 
 ## Instrucciones originales del usuario (no repetir, ya están incorporadas al proceso)
 
@@ -69,6 +71,7 @@ corregidos y pusheados — **pendientes de que el usuario los mergee**:
 | [#2](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/2) | `feature/monorepo-restructure` | Backend movido a `apps/api/`, `apps/pwa/` placeholder, `docs/api-contract.md`, `pnpm-workspace.yaml` |
 | [#3](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/3) | `feature/pwa-scaffold` | Vite+React+vite-plugin-pwa, layout mobile-first, rutas placeholder, cliente API mockeable (`VITE_API_MOCK`) |
 | [#4](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/4) | `feature/db-schema-v2` | Schema nuevo: `usuarios`, `precios_base`, `facturas` v2, `contadores` renombrado, `api_keys` eliminado. Migración verificada contra base vacía **y** contra base con datos del esquema viejo (usa `TRUNCATE` documentado, ver el PR). Módulos incompatibles con el modelo nuevo (`modules/auth`, `modules/tenants`, `modules/facturas`, `services/fiscal-rules`, `services/idempotency`) fueron **eliminados** con TODOs explícitos para las ramas que los recrean. |
+| [#5](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/5) | `feature/fiscal-rules-v2` | `calcularComprobante(unidades, precioBase, ptoVta)`, 100% coverage. **Ojo: esta es la única de las 5 ramas de Etapa 3 completada, y NO pasó por `/code-review`** (se priorizó cerrar el presupuesto) — correr la revisión antes de mergear. |
 
 **Importante sobre PR #4**: dejó `apps/api/vitest.config.ts` con
 `coverage.include: []` y sin `thresholds` (el coverage quedó desactivado a
@@ -86,18 +89,21 @@ anteriores).
 
 ## Lo que falta (en orden, ver `PLAN.md` para el detalle completo de cada rama)
 
-### Etapa 3 — 5 ramas en paralelo, todas dependen solo de `feature/db-schema-v2` (ninguna arrancó, hay que lanzarlas de cero)
+### Etapa 3 — dependen solo de `feature/db-schema-v2`
 
-- `feature/usuarios-auth` — login CUIT+contraseña, JWT access+refresh, tabla `refresh_tokens`, middleware de auth (reemplaza el viejo modelo de API key).
-- `feature/precios-base-service` — `getPrecioVigente(periodo)`, lookup por rango de fechas, validación de solapamiento al insertar.
-- `feature/fiscal-rules-v2` — `calcularComprobante(unidades, precioBase, ptoVta)`, constantes fiscales fijas (CondicionIVAReceptorId=1, DocNro=30677857516, etc.) todas documentadas con el porqué.
-- `feature/arca-service-per-user` — `ambiente` por usuario en vez de `env.ARCA_MODE` global, con test de regresión probando aislamiento real entre dos usuarios. **Ojo**: hay que verificar leyendo el código instalado de `@arcasdk/core` cómo el flag `production` elige host WSAA/WSFEV1 — no asumir.
-- `feature/pdf-generation` — `@arcasdk/pdf`, `GET /v1/facturas/:id/pdf` on-demand, Dockerfile con Chromium headless. Esta rama va a necesitar un stub de auth (todavía no existe `usuarios-auth`) — documentar el gap como bloqueante para producción.
+- ~~`feature/fiscal-rules-v2`~~ — **hecho, PR #5, falta pasar `/code-review high 5 --comment` y aplicar los hallazgos antes de mergear.**
+- `feature/usuarios-auth` — login CUIT+contraseña, JWT access+refresh, tabla `refresh_tokens`, middleware de auth (reemplaza el viejo modelo de API key). No arrancó, lanzar de cero.
+- `feature/precios-base-service` — `getPrecioVigente(periodo)`, lookup por rango de fechas, validación de solapamiento al insertar. No arrancó, lanzar de cero.
+- `feature/arca-service-per-user` — `ambiente` por usuario en vez de `env.ARCA_MODE` global, con test de regresión probando aislamiento real entre dos usuarios. **Ojo**: hay que verificar leyendo el código instalado de `@arcasdk/core` cómo el flag `production` elige host WSAA/WSFEV1 — no asumir. No arrancó, lanzar de cero.
+- `feature/pdf-generation` — `@arcasdk/pdf`, `GET /v1/facturas/:id/pdf` on-demand, Dockerfile con Chromium headless. Esta rama va a necesitar un stub de auth (todavía no existe `usuarios-auth`) — documentar el gap como bloqueante para producción. No arrancó, lanzar de cero.
 
-Los prompts completos y detallados para relanzar estas 5 ramas ya están
-redactados (se usaron para los dos intentos fallidos) — están en el
+Los prompts completos y detallados para relanzar las 4 ramas que faltan ya
+están redactados (se usaron para los dos intentos fallidos) — están en el
 historial de esta conversación si se retoma la misma sesión; si es una
 sesión nueva, `PLAN.md` tiene el resumen suficiente para reconstruirlos.
+Todas deben basarse en `origin/feature/db-schema-v2` (commit `8647f2a` o
+posterior, o `origin/develop` si ya mergeaste ese PR) — **no** en
+`feature/fiscal-rules-v2`, que es una rama hermana, no una base.
 
 ### Etapa 3b — 2 ramas en paralelo, dependen solo de `feature/pwa-scaffold`
 
