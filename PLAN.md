@@ -49,32 +49,32 @@ importe_total = unidades × precio_base_vigente(periodo)
 
 ## Qué se reusa tal cual del backend actual
 
-- `src/services/arca/index.ts` + `types.ts` — wrapper de `@arcasdk/core`, incluida la
+- `apps/api/src/services/arca/index.ts` + `types.ts` — wrapper de `@arcasdk/core`, incluida la
   traducción del rechazo silencioso de ARCA (`cae: ""`) a `ArcaRejectionError`. Solo cambia
   para leer `ambiente` por usuario en vez de `env.ARCA_MODE` global.
-- `src/config/crypto.ts` — AES-256-GCM para cert/key en reposo.
-- `src/errors/index.ts` — jerarquía `AppError` + handler global.
-- `src/db/index.ts`, `docker-compose.yml`, patrón de migraciones con drizzle-kit.
-- Patrón de registro de rutas (`src/app.ts` / `src/routes/index.ts`).
-- Patrón de tests: `vi.mock('@arcasdk/core', ...)` vía `tests/integration/arca-mock.ts`,
-  testcontainers, `tests/unit/schemas.test.ts` con Zod puro.
+- `apps/api/src/config/crypto.ts` — AES-256-GCM para cert/key en reposo.
+- `apps/api/src/errors/index.ts` — jerarquía `AppError` + handler global.
+- `apps/api/src/db/index.ts`, `docker-compose.yml`, patrón de migraciones con drizzle-kit.
+- Patrón de registro de rutas (`apps/api/src/app.ts` / `apps/api/src/routes/index.ts`).
+- Patrón de tests: `vi.mock('@arcasdk/core', ...)` vía `apps/api/tests/integration/arca-mock.ts`,
+  testcontainers, `apps/api/tests/unit/schemas.test.ts` con Zod puro.
 - Patrón de `contadores` (`INSERT ... ON CONFLICT DO UPDATE`) para numeración segura.
 
 ## Qué se reemplaza
 
-- `src/modules/auth/index.ts` (API key B2B) → login de usuario final CUIT + contraseña,
+- `apps/api/src/modules/auth/index.ts` (API key B2B) → login de usuario final CUIT + contraseña,
   JWT de acceso corto + refresh token (tabla `refresh_tokens` nueva). Se eligió JWT en vez de
   cookie de sesión porque funciona igual sea la PWA same-origin o no con el API, sin asumir
   nada sobre el despliegue.
-- `src/services/fiscal-rules/index.ts` (reglas genéricas multi-condición) → función pura
+- `apps/api/src/services/fiscal-rules/index.ts` (reglas genéricas multi-condición) → función pura
   `calcularComprobante({unidades, precioBase, ptoVta, periodo})` con receptor y
   `CondicionIVAReceptorId` fijos.
-- `src/db/schema/tenants.ts` → `usuarios.ts` (+ password_hash, ambiente, domicilio, condicion_iva).
-- `src/db/schema/facturas.ts` → agrega `periodo`, `unidades`, `precio_base_usado`,
+- `apps/api/src/db/schema/tenants.ts` → `usuarios.ts` (+ password_hash, ambiente, domicilio, condicion_iva).
+- `apps/api/src/db/schema/facturas.ts` → agrega `periodo`, `unidades`, `precio_base_usado`,
   `importe_total`, `pdf_url`; `estado` pasa a `pendiente|emitida|error`; se elimina
   `idempotency_key` (ver más abajo).
-- `src/db/schema/api-keys.ts` → se elimina (no hay API keys B2B en este producto).
-- `src/modules/tenants/` (alta admin) → `src/modules/usuarios/` (alta self-service: CUIT,
+- `apps/api/src/db/schema/api-keys.ts` → se elimina (no hay API keys B2B en este producto).
+- `apps/api/src/modules/tenants/` (alta admin) → `apps/api/src/modules/usuarios/` (alta self-service: CUIT,
   razón social, domicilio, contraseña, cert/key, con instrucciones guiadas en lenguaje simple
   para generar el certificado y delegar `wsfe`).
 

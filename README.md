@@ -36,6 +36,10 @@ certificados) están completamente aislados entre sí.
 
 ## Levantar el proyecto localmente
 
+Este backend vive en `apps/api/` (repo organizado como pnpm workspace, junto a `apps/pwa/`).
+Los pasos 2, 4, 5 y 6 se ejecutan dentro de `apps/api/`; el paso 3 (Postgres, vía
+`docker-compose.yml`) se ejecuta desde la raíz del repo.
+
 ### 1. Requisitos
 
 - Node.js 20+
@@ -45,6 +49,7 @@ certificados) están completamente aislados entre sí.
 ### 2. Variables de entorno
 
 ```bash
+cd apps/api
 cp .env.example .env
 ```
 
@@ -59,11 +64,15 @@ Pegar el valor generado en `.env`.
 
 ### 3. Levantar Postgres
 
+Desde la raíz del repo:
+
 ```bash
 docker compose up -d
 ```
 
 ### 4. Instalar dependencias
+
+Desde la raíz del repo (instala todo el workspace, incluido `apps/api`):
 
 ```bash
 pnpm install
@@ -71,12 +80,16 @@ pnpm install
 
 ### 5. Generar y aplicar migraciones
 
+Dentro de `apps/api/`:
+
 ```bash
 pnpm db:generate   # genera SQL a partir de src/db/schema (ya versionado en el repo)
 pnpm db:migrate    # aplica las migraciones contra Postgres
 ```
 
 ### 6. Levantar el servidor
+
+Dentro de `apps/api/`:
 
 ```bash
 pnpm dev
@@ -164,6 +177,8 @@ Otros endpoints:
 - `GET /v1/arca/status` — estado de los servicios de ARCA (WSAA/WSFE)
 
 ## Tests
+
+Dentro de `apps/api/`:
 
 ```bash
 pnpm test              # unit + integration
