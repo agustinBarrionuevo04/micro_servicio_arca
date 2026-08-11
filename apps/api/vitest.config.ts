@@ -10,19 +10,18 @@ export default defineConfig({
     fileParallelism: false,
     // `services/fiscal-rules` y `services/idempotency` (los módulos que
     // este coverage cubría) se eliminaron en `feature/db-schema-v2` — ver
-    // routes/index.ts para el porqué. Las ramas que los reemplazan
-    // (feature/fiscal-rules-v2, y la idempotencia por clave natural que
-    // absorbe feature/facturas-service-v2) deben volver a apuntar `include`
-    // a sus módulos nuevos y reinstalar el umbral de cobertura.
+    // routes/index.ts para el porqué. `include: []` NO desactiva el umbral:
+    // v8 sigue instrumentando todo `src/` y los thresholds de abajo se
+    // siguen evaluando contra eso, así que se sacan también (confirmado:
+    // `pnpm test:coverage` fallaba ~20-35% contra un piso de 80% con
+    // `include` vacío y los thresholds puestos). Las ramas que reemplazan
+    // esos módulos (feature/fiscal-rules-v2, y la idempotencia por clave
+    // natural que absorbe feature/facturas-service-v2) deben apuntar
+    // `include` a sus módulos nuevos y reinstalar `thresholds` juntos —
+    // uno sin el otro no tiene efecto real.
     coverage: {
       provider: 'v8',
       include: [],
-      thresholds: {
-        lines: 80,
-        functions: 80,
-        branches: 80,
-        statements: 80,
-      },
     },
   },
 });

@@ -46,8 +46,10 @@ export const facturas = pgTable(
     unidades: numeric('unidades', { precision: 10, scale: 2 }).notNull(),
     precioBaseUsado: numeric('precio_base_usado', { precision: 12, scale: 2 }).notNull(),
     importeTotal: numeric('importe_total', { precision: 12, scale: 2 }).notNull(),
-    // 11 = Factura C (ver services/fiscal-rules, CBTE_TIPO.FACTURA_C) — el
-    // único tipo que emite este producto (monotributo, receptor fijo).
+    // 11 = Factura C — el único tipo que emite este producto (monotributo,
+    // receptor fijo). feature/fiscal-rules-v2 recrea la constante
+    // CBTE_TIPO.FACTURA_C = 11 en su módulo nuevo; el valor hardcodeado acá
+    // debe seguir siendo 11 aunque ese módulo todavía no exista.
     cbteTipo: integer('cbte_tipo').notNull().default(11),
     ptoVta: integer('pto_vta').notNull(),
     // Null mientras la factura está 'pendiente' (número aún no confirmado

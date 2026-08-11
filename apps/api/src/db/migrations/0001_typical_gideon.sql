@@ -26,6 +26,19 @@ ALTER TABLE "tenants" DISABLE ROW LEVEL SECURITY;--> statement-breakpoint
 ALTER TABLE "api_keys" DISABLE ROW LEVEL SECURITY;--> statement-breakpoint
 DROP TABLE "tenants" CASCADE;--> statement-breakpoint
 DROP TABLE "api_keys" CASCADE;--> statement-breakpoint
+-- Ajuste manual (no generado por drizzle-kit): el modelo de negocio cambió
+-- por completo en este pivot (ventas genéricas por ítems, con un tenant
+-- B2B por API key -> unidades x precio_base para un receptor fijo, con un
+-- usuario final logueado). Una fila vieja de "facturas" no tiene ningún
+-- valor válido para representar en periodo/unidades/precio_base_usado/
+-- pto_vta (NOT NULL sin default más abajo), y su "tenant_id" apunta a una
+-- fila de "tenants" que el DROP TABLE de arriba ya borró, así que tampoco
+-- hay un "usuario_id" válido al que repuntar el rename de abajo. No existe
+-- una migración de datos correcta acá — se descartan explícitamente en vez
+-- de inventar valores falsos o dejar que el ALTER TABLE falle a mitad de
+-- camino contra cualquier base que no esté vacía (una de staging con datos
+-- de prueba del backend B2B viejo, por ejemplo).
+TRUNCATE TABLE "contadores", "facturas" CASCADE;--> statement-breakpoint
 ALTER TABLE "contadores" RENAME COLUMN "tenant_id" TO "usuario_id";--> statement-breakpoint
 ALTER TABLE "facturas" RENAME COLUMN "tenant_id" TO "usuario_id";--> statement-breakpoint
 -- Nota: drizzle-kit generó acá un `DROP CONSTRAINT` explícito para
