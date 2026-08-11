@@ -14,10 +14,24 @@ name: CI
 # repo root, once pnpm-workspace.yaml exists). Kept intentionally simple against the current
 # flat root layout instead of guessing at the future workspace filter name.
 
+# Cancels superseded runs when new commits land on the same PR/branch while a previous run is
+# still going — agents in this repo push several fixup commits per PR in quick succession
+# (see PLAN.md), and the test suite runs serially (vitest.config.ts: fileParallelism false), so
+# a stale run's Postgres service + full install/build/test cycle would otherwise keep burning
+# runner minutes after its result is already moot.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
-    name: Lint, build and test
+    # Lint step is currently commented out (no lint script exists yet, see below) — name
+    # reflects only what actually runs, so a green check can't be misread as "lint passed".
+    name: Build and test
     runs-on: ubuntu-latest
+    # Fails fast instead of falling back to GitHub's default 360-minute job timeout if a step
+    # (e.g. a flaky `pnpm install` against the registry) hangs.
+    timeout-minutes: 15
 
     # Matches tests/integration/env-setup.ts defaults exactly (DATABASE_URL points at
     # postgresql://postgres:postgres@localhost:5432/arca_billing_test). The integration tests
