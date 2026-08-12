@@ -78,9 +78,25 @@ export function calcularComprobante(input: CalcularComprobanteInput): Comprobant
   // precioBase puede llegar corrupto desde quien orquesta (ej. un lookup de
   // precios_base sin resultado devolviendo NaN, o un cálculo previo que
   // desbordó a Infinity). Nunca queremos reportarle a ARCA un importe NaN o
-  // Infinity: mejor fallar acá, temprano y explícito.
-  if (!Number.isFinite(precioBase)) {
-    throw new ValidationError('precioBase debe ser un número finito', { precioBase });
+  // Infinity: mejor fallar acá, temprano y explícito. También se exige > 0
+  // (no solo finito): `precios_base.precio` no tiene un CHECK constraint a
+  // nivel de columna (solo `numeric(12,2) NOT NULL`, ver
+  // `db/schema/precios_base.ts`), así que un typo al sembrar la tabla a
+  // mano (precio 0 o negativo) llegaría hasta acá sin que nada lo frene
+  // antes — exactamente el tipo de dato fiscal corrupto que este módulo
+  // existe para atajar (hallazgo de code review).
+  if (!Number.isFinite(precioBase) || precioBase <= 0) {
+    throw new ValidationError('precioBase debe ser un número finito mayor a 0', { precioBase });
+  }
+
+  // ptoVta viaja tal cual del usuario (ver `usuarios.puntoVenta`, que
+  // tampoco tiene CHECK constraint, solo `integer NOT NULL DEFAULT 1`) y va
+  // directo al payload que espera WSFE, que exige un punto de venta entero
+  // positivo. Mismo razonamiento que precioBase: sin esta validación, un
+  // dato corrupto llegaría a ARCA sin que nada lo frene antes (hallazgo de
+  // code review).
+  if (!Number.isInteger(ptoVta) || ptoVta <= 0) {
+    throw new ValidationError('ptoVta debe ser un número entero mayor a 0', { ptoVta });
   }
 
   // Dinero: se calcula en la unidad más chica (centavos) para no acumular

@@ -47,6 +47,32 @@ describe('calcularComprobante - validación de precioBase', () => {
   it('rechaza precioBase Infinity', () => {
     expect(() => calcularComprobante({ unidades: 100, precioBase: Infinity, ptoVta: 1 })).toThrow(ValidationError);
   });
+
+  it('rechaza precioBase = 0', () => {
+    expect(() => calcularComprobante({ unidades: 100, precioBase: 0, ptoVta: 1 })).toThrow(ValidationError);
+  });
+
+  it('rechaza precioBase negativo', () => {
+    expect(() => calcularComprobante({ unidades: 100, precioBase: -95000, ptoVta: 1 })).toThrow(ValidationError);
+  });
+});
+
+describe('calcularComprobante - validación de ptoVta', () => {
+  it('rechaza ptoVta = 0', () => {
+    expect(() => calcularComprobante({ unidades: 100, precioBase: 95000, ptoVta: 0 })).toThrow(ValidationError);
+  });
+
+  it('rechaza ptoVta negativo', () => {
+    expect(() => calcularComprobante({ unidades: 100, precioBase: 95000, ptoVta: -1 })).toThrow(ValidationError);
+  });
+
+  it('rechaza ptoVta no entero', () => {
+    expect(() => calcularComprobante({ unidades: 100, precioBase: 95000, ptoVta: 1.5 })).toThrow(ValidationError);
+  });
+
+  it('rechaza ptoVta NaN', () => {
+    expect(() => calcularComprobante({ unidades: 100, precioBase: 95000, ptoVta: NaN })).toThrow(ValidationError);
+  });
 });
 
 /**
