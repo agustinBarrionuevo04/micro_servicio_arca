@@ -6,7 +6,7 @@ settings:
 
 importers:
 
-  .:
+  apps/api:
     dependencies:
       '@arcasdk/core':
         specifier: ^1.0.0
@@ -63,6 +63,8 @@ importers:
       vitest:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@20.19.43)(supports-color@7.2.0)
+
+  apps/pwa: {}
 
 packages:
 

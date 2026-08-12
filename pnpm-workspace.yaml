@@ -1,3 +1,6 @@
+packages:
+  - 'apps/*'
+
 allowBuilds:
   argon2: true
   cpu-features: true
