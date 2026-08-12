@@ -20,14 +20,31 @@
  */
 import { crearPrecioBase } from '../src/services/precios-base/index.js';
 
-/** Parsea `YYYY-MM-DD` a un `Date` en hora local — mismo criterio que usa `services/precios-base` (ver el comentario ahí sobre por qué nunca `toISOString`/UTC para estas fechas de solo-calendario). */
+/**
+ * Parsea `YYYY-MM-DD` a un `Date` en hora local — mismo criterio que usa
+ * `services/precios-base` (ver el comentario ahí sobre por qué nunca
+ * `toISOString`/UTC para estas fechas de solo-calendario).
+ *
+ * El regex solo valida el *formato* (4-2-2 dígitos), no que sea una fecha de
+ * calendario real: `new Date(2026, 1, 30)` (30 de febrero, no existe) no
+ * tira error, hace rollover silencioso al 2 de marzo. Un typo de un admin
+ * sembrando el precio a mano (ej. `2026-02-30` o `2026-13-01`) quedaría con
+ * una fecha de vigencia corrida sin ningún aviso (hallazgo de code review,
+ * confirmado). Por eso se reconstruye la fecha después de crearla y se
+ * compara componente a componente contra lo que se pidió — si no coincide,
+ * `Date` normalizó algo que no era una fecha válida.
+ */
 function parseFechaLocal(input: string): Date {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input);
   if (!match) {
     throw new Error(`Fecha inválida: "${input}" (se espera YYYY-MM-DD)`);
   }
   const [, year, month, day] = match.map(Number) as [number, number, number, number];
-  return new Date(year, month - 1, day);
+  const fecha = new Date(year, month - 1, day);
+  if (fecha.getFullYear() !== year || fecha.getMonth() !== month - 1 || fecha.getDate() !== day) {
+    throw new Error(`Fecha inválida: "${input}" no es una fecha de calendario real`);
+  }
+  return fecha;
 }
 
 async function main() {

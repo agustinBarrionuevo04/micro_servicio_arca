@@ -298,3 +298,65 @@ describe('crearPrecioBase + getPrecioVigente - integración end-to-end', () => {
     expect((await getPrecioVigente(new Date(2026, 11, 31))).precio).toBe('95000.00');
   });
 });
+
+/**
+ * Regresión de code review: `input.precio.toFixed(2)` redondeaba mal cerca
+ * de bordes `.xx5` por el error de representación binaria del `number` (ej.
+ * `(1.005).toFixed(2)` da `'1.00'`, no `'1.01'`). Ver el comentario de
+ * `formatPrecio` en `services/precios-base/index.ts` para el detalle.
+ */
+describe('crearPrecioBase - redondeo de precio a centavos', () => {
+  it('redondea 1.005 hacia arriba a 1.01 (toFixed(2) nativo daba 1.00)', async () => {
+    const creado = await crearPrecioBase({ precio: 1.005, vigenteDesde: new Date(2026, 0, 1) });
+    expect(creado.precio).toBe('1.01');
+  });
+
+  it('redondea 95000.555 hacia arriba a 95000.56', async () => {
+    const creado = await crearPrecioBase({ precio: 95000.555, vigenteDesde: new Date(2026, 0, 1) });
+    expect(creado.precio).toBe('95000.56');
+  });
+
+  it('un precio ya exacto a 2 decimales no se ve afectado', async () => {
+    const creado = await crearPrecioBase({ precio: 95000.5, vigenteDesde: new Date(2026, 0, 1) });
+    expect(creado.precio).toBe('95000.50');
+  });
+
+  it('el acarreo de centavos redondeados sube también la parte entera (99.995 -> 100.00)', async () => {
+    const creado = await crearPrecioBase({ precio: 99.995, vigenteDesde: new Date(2026, 0, 1) });
+    expect(creado.precio).toBe('100.00');
+  });
+});
+
+/**
+ * Regresión de code review: `SELECT ... FOR UPDATE` no bloquea filas que
+ * todavía no existen, así que dos `crearPrecioBase` concurrentes para
+ * rangos que no pisan ninguna fila commiteada (pero sí se pisan entre sí)
+ * podían pasar la validación ambas y dejar un solapamiento real en la
+ * tabla. La corrección es un `pg_advisory_xact_lock` — ver el comentario de
+ * `crearPrecioBase` ("Concurrencia: advisory lock, no SELECT ... FOR
+ * UPDATE").
+ */
+describe('crearPrecioBase - concurrencia (regresión: inserts fantasma solapados)', () => {
+  it('de dos llamadas concurrentes con rangos abiertos solapados, una crea y la otra rechaza por solapamiento', async () => {
+    // Ambas son "el precio actual" (vigenteHasta abierto) arrancando el
+    // mismo día — sobre una tabla vacía, así que ninguna fila existente
+    // puede protegerlas vía FOR UPDATE. Sin el advisory lock, las dos
+    // podían leer 0 filas conflictivas y las dos insertaban.
+    const resultados = await Promise.allSettled([
+      crearPrecioBase({ precio: 95000, vigenteDesde: new Date(2026, 0, 1) }),
+      crearPrecioBase({ precio: 96000, vigenteDesde: new Date(2026, 0, 1) }),
+    ]);
+
+    const exitosas = resultados.filter((r) => r.status === 'fulfilled');
+    const rechazadas = resultados.filter((r) => r.status === 'rejected');
+
+    expect(exitosas).toHaveLength(1);
+    expect(rechazadas).toHaveLength(1);
+    expect((rechazadas[0] as PromiseRejectedResult).reason).toBeInstanceOf(PrecioBaseSolapadoError);
+
+    // La tabla queda con una sola fila — la corrupción que este test
+    // regresiona dejaba dos filas abiertas solapadas.
+    const filas = await db.select().from(preciosBase);
+    expect(filas).toHaveLength(1);
+  });
+});

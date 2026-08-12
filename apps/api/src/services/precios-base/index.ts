@@ -36,7 +36,7 @@
  * para atrás — exactamente el tipo de bug de límite silencioso que le
  * cobraría a un usuario con el precio del mes equivocado.
  */
-import { and, eq, gte, isNull, lt, lte, or } from 'drizzle-orm';
+import { and, eq, gte, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import { db, type Database, type Transaction } from '../../db/index.js';
 import { preciosBase, type PrecioBase } from '../../db/schema/index.js';
 import {
@@ -58,6 +58,54 @@ function formatDateOnly(date: Date): string {
 function diaAnterior(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() - 1);
 }
+
+/**
+ * Formatea `precio` a 2 decimales para la columna `numeric` de Postgres,
+ * SIN pasar por `precio.toFixed(2)`. `toFixed` redondea sobre la aritmética
+ * de punto flotante del `number`, que arrastra el error de representación
+ * binaria del literal: `1.005` en realidad se guarda como
+ * `1.00499999999999989...`, así que `(1.005).toFixed(2)` da `'1.00'` en vez
+ * de `'1.01'` — un precio mal persistido en silencio, sin ningún error que
+ * lo delate (hallazgo de code review, confirmado con `node -e
+ * "console.log((1.005).toFixed(2))"`).
+ *
+ * En cambio, esta función redondea sobre la representación decimal en
+ * string más corta que reproduce exactamente ese `number` (`precio.toString()`
+ * — la que coincide con lo que un humano tipeó, ej. `"1.005"`), mirando el
+ * tercer dígito decimal para decidir si el centavo sube. Asume que `precio`
+ * no cae en notación exponencial al convertirlo a string, lo cual vale para
+ * cualquier monto de moneda real (JS solo usa notación exponencial fuera de
+ * `[1e-6, 1e21)`, muy por fuera de cualquier precio base plausible).
+ *
+ * No maneja signo negativo a propósito: el único caller (`crearPrecioBase`)
+ * ya rechaza `precio <= 0` antes de llegar acá, así que un negativo nunca
+ * puede pasar por esta función — manejarlo igual sería código defensivo
+ * para un caso que la validación de arriba ya hace imposible.
+ */
+function formatPrecio(precio: number): string {
+  const [enterosStr, decimalesStr = ''] = precio.toString().split('.');
+  const decimales = decimalesStr.padEnd(3, '0');
+  const centavos = Number(decimales.slice(0, 2));
+  const tercerDigito = Number(decimales[2]);
+
+  let enteros = Number(enterosStr);
+  let centavosRedondeados = tercerDigito >= 5 ? centavos + 1 : centavos;
+  if (centavosRedondeados === 100) {
+    enteros += 1;
+    centavosRedondeados = 0;
+  }
+
+  return `${enteros}.${String(centavosRedondeados).padStart(2, '0')}`;
+}
+
+/**
+ * Clave arbitraria para `pg_advisory_xact_lock` (ver su uso en
+ * `crearPrecioBase`). No colisiona con nada más en esta app: no hay otro uso
+ * de advisory locks en el código hoy (confirmado por grep antes de agregar
+ * este). Si en el futuro se agrega otro advisory lock, elegir una clave
+ * distinta.
+ */
+const PRECIOS_BASE_LOCK_KEY = 823_451_007n;
 
 /**
  * Busca la fila de `precios_base` vigente para `periodo`. Nunca devuelve
@@ -163,10 +211,25 @@ export interface CrearPrecioBaseInput {
  * (`PrecioBaseSolapadoError`), porque cualquiera de esas filas abiertas se
  * superpone con la nueva.
  *
- * Todo (lectura con lock, cierre, validación de solapamiento, insert) corre
- * en una única transacción con `SELECT ... FOR UPDATE` sobre las filas
- * relevantes, para que dos ejecuciones concurrentes de este script no
- * puedan insertar rangos solapados coordinándose por interleaving.
+ * ## Concurrencia: advisory lock, no `SELECT ... FOR UPDATE`
+ *
+ * La primera versión de esta función usaba `SELECT ... FOR UPDATE` sobre las
+ * filas existentes para serializar inserts concurrentes — pero `FOR UPDATE`
+ * solo bloquea filas que **ya existen** y matchean el `WHERE`. No protege
+ * contra un insert "fantasma" concurrente: dos llamadas simultáneas para la
+ * primera fila de una tabla vacía, o dos rangos nuevos que no pisan ninguna
+ * fila ya commiteada pero sí se pisan entre sí, pasan ambas la validación
+ * bajo `READ COMMITTED` y las dos insertan — dejando un solapamiento real en
+ * la tabla (hallazgo de code review, confirmado).
+ *
+ * La corrección es un `pg_advisory_xact_lock` al principio de la
+ * transacción: la segunda llamada concurrente queda bloqueada hasta que la
+ * primera haga commit/rollback, así que siempre ve el estado ya consistente
+ * antes de leer/validar. El volumen de escritura de esta tabla es
+ * bajísimo (se siembra a mano, cambia unas pocas veces al año, ver
+ * PLAN.md), así que serializar *todos* los inserts (no solo los que
+ * realmente se superponen) es una simplificación aceptable, no un cuello de
+ * botella real.
  */
 export async function crearPrecioBase(input: CrearPrecioBaseInput, executor: Database = db): Promise<PrecioBase> {
   if (!Number.isFinite(input.precio) || input.precio <= 0) {
@@ -184,6 +247,13 @@ export async function crearPrecioBase(input: CrearPrecioBaseInput, executor: Dat
   }
 
   return executor.transaction(async (tx) => {
+    // Serializa TODAS las llamadas concurrentes a crearPrecioBase antes de
+    // leer nada — ver el comentario de la función ("Concurrencia: advisory
+    // lock"). Tiene que ser lo primero en la transacción: si se leyera algo
+    // antes de tomar el lock, una segunda transacción podría colarse entre
+    // esa lectura y el insert de la primera.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${PRECIOS_BASE_LOCK_KEY})`);
+
     // Cierre automático de la fila "actual" — ver el comentario de la
     // función para el razonamiento completo. Solo cuando la nueva fila es
     // abierta.
@@ -191,8 +261,7 @@ export async function crearPrecioBase(input: CrearPrecioBaseInput, executor: Dat
       const abiertasAnteriores = await tx
         .select()
         .from(preciosBase)
-        .where(and(isNull(preciosBase.vigenteHasta), lt(preciosBase.vigenteDesde, vigenteDesdeStr)))
-        .for('update');
+        .where(and(isNull(preciosBase.vigenteHasta), lt(preciosBase.vigenteDesde, vigenteDesdeStr)));
 
       if (abiertasAnteriores.length === 1) {
         const cierre = formatDateOnly(diaAnterior(input.vigenteDesde));
@@ -218,8 +287,7 @@ export async function crearPrecioBase(input: CrearPrecioBaseInput, executor: Dat
     const solapadas = await tx
       .select()
       .from(preciosBase)
-      .where(and(...condicionesSolapamiento))
-      .for('update');
+      .where(and(...condicionesSolapamiento));
 
     if (solapadas.length > 0) {
       throw new PrecioBaseSolapadoError(
@@ -235,7 +303,7 @@ export async function crearPrecioBase(input: CrearPrecioBaseInput, executor: Dat
     const [creado] = await tx
       .insert(preciosBase)
       .values({
-        precio: input.precio.toFixed(2),
+        precio: formatPrecio(input.precio),
         vigenteDesde: vigenteDesdeStr,
         vigenteHasta: vigenteHastaStr,
       })
