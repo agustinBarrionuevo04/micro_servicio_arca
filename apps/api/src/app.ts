@@ -27,7 +27,21 @@ export async function buildApp() {
         ? false
         : {
             level: env.NODE_ENV === 'production' ? 'info' : 'debug',
-            redact: ['req.headers.authorization'],
+            // El serializer de request por default de Fastify no incluye
+            // `req.body` ni `req.headers` (solo method/url/hostname/ip, ver
+            // `fastify/lib/logger.js`), así que ninguno de estos paths se
+            // loguea hoy en el flujo normal de request/response. Se
+            // redactan igual, por dos motivos: (1) defensa en profundidad —
+            // si alguna ruta o hook futuro llega a loguear `request.body` o
+            // `request.headers` explícitamente (ej. `request.log.info({
+            // body: request.body })` para debug), password/tokens no
+            // terminan en texto plano en los logs sin que nadie lo note; (2)
+            // ya había un precedente para `req.headers.authorization` (API
+            // key del viejo `modules/auth`) — `password` (`POST
+            // /v1/auth/login`) y `refreshToken` (`POST /v1/auth/refresh`,
+            // body y también viaja en la respuesta) son credenciales
+            // equivalentes y merecen la misma cobertura.
+            redact: ['req.headers.authorization', 'req.body.password', 'req.body.refreshToken'],
           },
   }).withTypeProvider<ZodTypeProvider>();
 

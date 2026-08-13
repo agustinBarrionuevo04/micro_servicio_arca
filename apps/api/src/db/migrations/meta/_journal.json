@@ -15,6 +15,13 @@
       "when": 1786476936270,
       "tag": "0001_typical_gideon",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786562220729,
+      "tag": "0002_chief_killer_shrike",
+      "breakpoints": true
     }
   ]
 }
