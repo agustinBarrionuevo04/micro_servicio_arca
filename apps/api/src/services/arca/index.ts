@@ -11,7 +11,6 @@
  * código pueda tratarlo como cualquier otro error.
  */
 import { ArcaRejectionError, InternalArcaError } from '../../errors/index.js';
-import { env } from '../../config/env.js';
 import type {
   ArcaCredentials,
   ArcaFacturaRequest,
@@ -72,7 +71,26 @@ export async function createArcaClient(credentials: ArcaCredentials): Promise<Ar
     cuit: cuitToNumber(credentials.cuit),
     cert: credentials.cert,
     key: credentials.key,
-    production: env.ARCA_MODE === 'produccion',
+    // `ambiente` viaja por usuario (columna `usuarios.ambiente`), nunca
+    // desde una variable de entorno global — cuentas de prueba
+    // (homologación) y repartidores reales (producción) conviven en la
+    // misma tabla y en el mismo proceso. Verificado leyendo el código
+    // instalado de `@arcasdk/core` (lib/infrastructure/composition/arca.js
+    // y .../outbound/adapters/repositories/{auth,electronic-billing}/*.js):
+    // este flag booleano se guarda como propiedad de instancia en
+    // `AuthRepository` y en `ElectronicBillingRepository` (ambos creados de
+    // nuevo en cada `new Arca(...)`), y decide ahí, por instancia, contra
+    // qué host pegar — WSAA: wsaa.afip.gov.ar vs wsaahomo.afip.gov.ar;
+    // WSFEv1: servicios1.afip.gov.ar/wsfev1 vs wswhomo.afip.gov.ar/wsfev1
+    // (`outbound/ports/soap/enums/endpoints.enum.js`). No hay estado
+    // module-level ni compartido entre instancias de `Arca`: dos clientes
+    // construidos en el mismo proceso con `production` distinto son
+    // completamente independientes. Si `ambiente` faltara, el SDK
+    // default-ea `production` a `false` (homologación) — mismo lado seguro
+    // que el default de la columna (`usuarios.ambiente` default
+    // `'homologacion'`), pero igual no debe pasar nunca `undefined` acá:
+    // siempre viene explícito desde `credentials.ambiente`.
+    production: credentials.ambiente === 'produccion',
   });
 
   return {
@@ -133,24 +151,28 @@ export async function createArcaClient(credentials: ArcaCredentials): Promise<Ar
 }
 
 // Instanciar `Arca` involucra parsear el cert/key y preparar el cliente SOAP,
-// así que cacheamos un cliente por tenant en vez de reconstruirlo en cada request.
+// así que cacheamos un cliente por usuario en vez de reconstruirlo en cada
+// request. La clave de cache es `usuarioId` (no `ambiente`, ni ningún valor
+// compartido): cada usuario tiene sus propias credenciales (cert/key/cuit)
+// además de su propio `ambiente`, así que el cache nunca podría cruzar
+// clientes entre dos usuarios aunque coincidieran en `ambiente`.
 const clientCache = new Map<string, ArcaClient>();
 
-export async function getArcaClientForTenant(
-  tenantId: string,
+export async function getArcaClientForUsuario(
+  usuarioId: string,
   credentials: ArcaCredentials
 ): Promise<ArcaClient> {
-  const cached = clientCache.get(tenantId);
+  const cached = clientCache.get(usuarioId);
   if (cached) return cached;
 
   const client = await createArcaClient(credentials);
-  clientCache.set(tenantId, client);
+  clientCache.set(usuarioId, client);
   return client;
 }
 
-export function clearArcaClientCache(tenantId?: string): void {
-  if (tenantId) {
-    clientCache.delete(tenantId);
+export function clearArcaClientCache(usuarioId?: string): void {
+  if (usuarioId) {
+    clientCache.delete(usuarioId);
   } else {
     clientCache.clear();
   }

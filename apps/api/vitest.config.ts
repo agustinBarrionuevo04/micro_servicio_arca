@@ -15,13 +15,28 @@ export default defineConfig({
     // siguen evaluando contra eso, así que se sacan también (confirmado:
     // `pnpm test:coverage` fallaba ~20-35% contra un piso de 80% con
     // `include` vacío y los thresholds puestos). Las ramas que reemplazan
-    // esos módulos (feature/fiscal-rules-v2, y la idempotencia por clave
-    // natural que absorbe feature/facturas-service-v2) deben apuntar
-    // `include` a sus módulos nuevos y reinstalar `thresholds` juntos —
-    // uno sin el otro no tiene efecto real.
+    // esos módulos deben apuntar `include` a sus módulos nuevos y
+    // reinstalar `thresholds` juntos — uno sin el otro no tiene efecto real.
+    //
+    // `services/arca` (`feature/arca-service-per-user`) se suma acá: el
+    // test de regresión (`tests/unit/arca.test.ts`) cubre la resolución de
+    // `ambiente` por usuario, el aislamiento entre dos usuarios en el mismo
+    // proceso, el cacheo por `usuarioId`, la traducción de rechazo
+    // silencioso de ARCA a `ArcaRejectionError`, y `getStatus()`. Ramas
+    // hermanas (`feature/fiscal-rules-v2`, `feature/precios-base-service`)
+    // suman su propio path a este mismo array por separado — un merge que
+    // junte varias va a necesitar reconciliar este array a mano (esperado,
+    // ver PLAN.md / FASE2.md sobre el diff inflado hasta que
+    // `feature/db-schema-v2` mergee).
     coverage: {
       provider: 'v8',
-      include: [],
+      include: ['src/services/arca/**'],
+      thresholds: {
+        lines: 95,
+        functions: 95,
+        branches: 95,
+        statements: 95,
+      },
     },
   },
 });
