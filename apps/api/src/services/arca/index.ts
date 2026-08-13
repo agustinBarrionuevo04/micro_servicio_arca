@@ -156,6 +156,25 @@ export async function createArcaClient(credentials: ArcaCredentials): Promise<Ar
 // compartido): cada usuario tiene sus propias credenciales (cert/key/cuit)
 // además de su propio `ambiente`, así que el cache nunca podría cruzar
 // clientes entre dos usuarios aunque coincidieran en `ambiente`.
+//
+// IMPORTANTE (hallazgo de code review, no negociable por PLAN.md "Seguridad"):
+// este cache NO se invalida solo cuando cambian `ambiente`/`cert`/`key` de un
+// usuario en la base — antes de este pivot `ambiente` era una variable de
+// entorno de todo el proceso, fija al arrancar, así que "quedar viejo" no era
+// un problema. Ahora que `ambiente` vive en una columna mutable
+// (`usuarios.ambiente`), cualquier UPDATE manual a esa fila (downgrade de
+// producción a homologación, rotación de cert/key) deja el `ArcaClient`
+// cacheado apuntando a la config VIEJA hasta que se llame
+// `clearArcaClientCache(usuarioId)` explícitamente o se reinicie el proceso.
+// Hoy no hay ningún endpoint del MVP que edite `usuarios.ambiente`/`cert`/
+// `key` después del alta (ver PLAN.md — sin panel de admin), así que este
+// camino solo se dispara por una intervención manual en la base; aun así, es
+// la dirección peligrosa exactamente (un cliente de producción sobreviviendo
+// a un downgrade a homologación), así que: **cualquier UPDATE manual a
+// `usuarios.ambiente`/`cert`/`key` tiene que ir acompañado de
+// `clearArcaClientCache(usuarioId)` o un reinicio del proceso.** Si en el
+// futuro se agrega un endpoint que edite estos campos, ese endpoint tiene
+// que llamar `clearArcaClientCache(usuarioId)` como parte del mismo handler.
 const clientCache = new Map<string, ArcaClient>();
 
 export async function getArcaClientForUsuario(
@@ -170,6 +189,7 @@ export async function getArcaClientForUsuario(
   return client;
 }
 
+/** Ver el comentario de `clientCache` sobre cuándo hay que llamar esto: siempre que `usuarios.ambiente`/`cert`/`key` cambien, manualmente o desde un futuro endpoint. */
 export function clearArcaClientCache(usuarioId?: string): void {
   if (usuarioId) {
     clientCache.delete(usuarioId);
