@@ -3,7 +3,12 @@ packages:
 
 allowBuilds:
   argon2: true
+  core-js: true
   cpu-features: true
   esbuild: true
   protobufjs: true
+  puppeteer: true
   ssh2: true
+
+patchedDependencies:
+  '@arcasdk/pdf@0.2.0': patches/@arcasdk__pdf@0.2.0.patch

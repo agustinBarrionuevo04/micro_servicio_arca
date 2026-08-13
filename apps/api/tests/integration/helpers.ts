@@ -1,7 +1,7 @@
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { sql } from 'drizzle-orm';
 import { db } from '../../src/db/index.js';
-import { usuarios, type ArcaAmbiente } from '../../src/db/schema/index.js';
+import { usuarios, facturas, type ArcaAmbiente, type Factura } from '../../src/db/schema/index.js';
 
 export async function runMigrations(): Promise<void> {
   await migrate(db, { migrationsFolder: './src/db/migrations' });
@@ -77,4 +77,43 @@ export async function createTestUsuario(
     cuit: usuario.cuit,
     puntoVenta,
   };
+}
+
+/**
+ * No hay todavía un endpoint que emita facturas (`feature/facturas-service-v2`,
+ * Etapa 4) en esta rama, así que los tests de integración insertan la fila
+ * directo vía `db.insert(facturas)`, igual que `createTestUsuario` hace con
+ * `usuarios` (ver docstring de arriba). Defaults pensados para representar
+ * una factura ya `emitida` (con `cae`/`caeFchVto`/`cbteNro` completos) porque
+ * ese es el caso feliz de `GET /v1/facturas/:id/pdf`; los tests que necesitan
+ * otros estados pasan `overrides`.
+ */
+export async function createTestFactura(
+  usuarioId: string,
+  overrides: Partial<typeof facturas.$inferInsert> = {}
+): Promise<Factura> {
+  const [factura] = await db
+    .insert(facturas)
+    .values({
+      usuarioId,
+      periodo: '2026-08-01',
+      unidades: '340.00',
+      precioBaseUsado: '95000.00',
+      importeTotal: '32300000.00',
+      cbteTipo: 11,
+      ptoVta: 1,
+      cbteNro: 123,
+      cae: '75239876543210',
+      caeFchVto: '2026-08-20',
+      estado: 'emitida',
+      payloadEnviado: {},
+      ...overrides,
+    })
+    .returning();
+
+  if (!factura) {
+    throw new Error('Failed to create test factura');
+  }
+
+  return factura;
 }

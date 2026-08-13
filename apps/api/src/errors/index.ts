@@ -67,3 +67,19 @@ export class FacturaNotFoundError extends AppError {
     super('FACTURA_NOT_FOUND', 'Factura not found', 404);
   }
 }
+
+/**
+ * `GET /v1/facturas/:id/pdf` reconstruye el PDF a partir del CAE + datos del
+ * comprobante (ver PLAN.md, "PDF") — una factura `pendiente` o `error`
+ * todavía no tiene CAE, así que no hay nada fiscalmente válido que renderizar
+ * todavía (mostrar un PDF sin CAE sería un comprobante trucho). 409 porque el
+ * recurso (`factura`) existe y se identificó correctamente — el conflicto es
+ * de estado, no de identidad (eso ya lo cubre `FacturaNotFoundError` / 404).
+ */
+export class FacturaNoEmitidaError extends AppError {
+  constructor(estado: string) {
+    super('FACTURA_NOT_EMITIDA', `La factura no está emitida (estado actual: ${estado})`, 409, {
+      estado,
+    });
+  }
+}

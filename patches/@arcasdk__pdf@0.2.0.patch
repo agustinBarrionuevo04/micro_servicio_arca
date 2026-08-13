@@ -1,0 +1,32 @@
+diff --git a/lib/generator/invoice-pdf-generator.js b/lib/generator/invoice-pdf-generator.js
+index 2c7448f38568487532a181b40c1bca4f9c47eee9..f613d9b428a92929ca00a5fb134ebb1545ddec87 100644
+--- a/lib/generator/invoice-pdf-generator.js
++++ b/lib/generator/invoice-pdf-generator.js
+@@ -115,7 +115,26 @@ class InvoicePdfGenerator {
+             const renderTemplate = this.renderTemplate;
+             const optsWithCopy = Object.assign(Object.assign({}, this.opts), { copy });
+             const html = renderTemplate({ data, options: optsWithCopy, qrDataUrl });
+-            const browser = yield puppeteer_1.default.launch({ headless: true });
++            // Parche local (ver `patches/@arcasdk__pdf@0.2.0.patch` en el repo,
++            // aplicado vía `pnpm patch` / `pnpm.patchedDependencies`): la
++            // versión sin parchear llama a `puppeteer.launch({ headless: true })`
++            // sin exponer forma de pasar `args`, así que Chromium usa su sandbox
++            // por setuid/userns por default. Eso falla tanto en contenedores
++            // (Docker) como en hosts con AppArmor restringiendo unprivileged user
++            // namespaces (Ubuntu 23.10+, `kernel.apparmor_restrict_unprivileged_userns=1`)
++            // con "No usable sandbox!" — no hay forma de arreglarlo desde afuera
++            // de esta librería sin correr como root con el binario chrome_sandbox
++            // con setuid root, que no es viable en una imagen de contenedor
++            // mínima. `--no-sandbox --disable-setuid-sandbox` es el workaround
++            // estándar y documentado para Puppeteer en Docker (ver
++            // https://pptr.dev/troubleshooting#running-puppeteer-in-docker) — el
++            // contenedor ya provee su propio aislamiento, así que perder el
++            // sandbox interno de Chromium es un trade-off aceptado, no un
++            // descuido.
++            const browser = yield puppeteer_1.default.launch({
++                headless: true,
++                args: ["--no-sandbox", "--disable-setuid-sandbox"],
++            });
+             try {
+                 const page = yield browser.newPage();
+                 const { format: pageFormat, width: pageWidthMm, height: pageHeightMm, } = PAGE_DIMENSIONS[this.opts.pageSize || "A4"] || PAGE_DIMENSIONS.A4;

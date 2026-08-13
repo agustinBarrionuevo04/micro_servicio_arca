@@ -1,0 +1,15 @@
+# Usado por `apps/api/Dockerfile` (build context = raíz del repo, ver
+# comentario en ese archivo sobre por qué). Reduce el contexto enviado al
+# daemon de Docker; no afecta qué termina copiado dentro de la imagen (eso
+# lo controlan los `COPY` explícitos del Dockerfile).
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.env
+**/.env
+*.log
+coverage/
+**/coverage/
+.git/
+.claude/
