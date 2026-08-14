@@ -26,7 +26,7 @@ import { db } from '../../db/index.js';
 import { usuarios } from '../../db/schema/index.js';
 import { verifyAccessToken } from './jwt.js';
 import { InvalidTokenError } from '../../errors/index.js';
-import { toAuthenticatedUsuario, type AuthenticatedUsuario } from './types.js';
+import { authenticatedUsuarioColumns, type AuthenticatedUsuario } from './types.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -37,7 +37,12 @@ declare module 'fastify' {
 function extractBearerToken(authHeader: string | undefined): string | null {
   if (!authHeader) return null;
   const parts = authHeader.split(' ');
-  if (parts.length !== 2 || parts[0] !== 'Bearer') return null;
+  // RFC 7235: el nombre del auth-scheme es case-insensitive. Un cliente que
+  // mande `authorization: bearer <token>` (algunas libs HTTP normalizan a
+  // minúscula) es tan válido como `Bearer` — comparar case-sensitive
+  // rechazaba tokens por lo demás perfectamente válidos (hallazgo de code
+  // review).
+  if (parts.length !== 2 || parts[0]?.toLowerCase() !== 'bearer') return null;
   return parts[1] ?? null;
 }
 
@@ -52,7 +57,11 @@ export async function authenticate(request: FastifyRequest, _reply: FastifyReply
   // vencido o malformado — ver jwt.ts.
   const payload = verifyAccessToken(token);
 
-  const [usuario] = await db.select().from(usuarios).where(eq(usuarios.id, payload.usuarioId)).limit(1);
+  const [usuario] = await db
+    .select(authenticatedUsuarioColumns)
+    .from(usuarios)
+    .where(eq(usuarios.id, payload.usuarioId))
+    .limit(1);
 
   if (!usuario) {
     // El usuario fue borrado (o nunca existió, ej. un JWT falsificado con
@@ -65,5 +74,5 @@ export async function authenticate(request: FastifyRequest, _reply: FastifyReply
     throw new InvalidTokenError();
   }
 
-  request.usuario = toAuthenticatedUsuario(usuario);
+  request.usuario = usuario;
 }

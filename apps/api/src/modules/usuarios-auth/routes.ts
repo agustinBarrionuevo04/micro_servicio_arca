@@ -19,20 +19,20 @@ export async function registerUsuariosAuthRoutes(app: FastifyInstance): Promise<
       },
       tags: ['auth'],
       description: 'Login de usuario final con CUIT + contraseña',
+      // Sin esto, el default global de app.ts (`security: [{ bearerAuth: [] }]`)
+      // documenta esta ruta pública como si necesitara un token — pero es
+      // justamente la ruta que lo emite, todavía no existe ningún token
+      // cuando se la llama. Un cliente generado desde el spec OpenAPI podría
+      // intentar mandar un Authorization inexistente o negarse a llamarla
+      // sin uno (hallazgo de code review).
+      security: [],
     },
     handler: async (request, reply) => {
       const result = await login(request.body);
-
-      return reply.status(200).send({
-        accessToken: result.accessToken,
-        refreshToken: result.refreshToken,
-        usuario: {
-          id: result.usuario.id,
-          cuit: result.usuario.cuit,
-          razonSocial: result.usuario.razonSocial,
-          ambiente: result.usuario.ambiente,
-        },
-      });
+      // El serializador Zod de Fastify ya descarta cualquier campo de
+      // `result.usuario` que no esté en `loginResponseSchema` — no hace
+      // falta repetir a mano la lista de campos que ya define ese schema.
+      return reply.status(200).send(result);
     },
   });
 
@@ -44,6 +44,8 @@ export async function registerUsuariosAuthRoutes(app: FastifyInstance): Promise<
       },
       tags: ['auth'],
       description: 'Renueva el accessToken a partir de un refreshToken válido (rota el refresh token)',
+      // Ver el comentario equivalente en /v1/auth/login.
+      security: [],
     },
     handler: async (request, reply) => {
       const result = await refresh(request.body.refreshToken);

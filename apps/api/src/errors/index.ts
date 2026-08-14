@@ -38,12 +38,6 @@ export class TenantNotFoundError extends AppError {
   }
 }
 
-export class UnauthorizedError extends AppError {
-  constructor(message = 'Invalid or missing API key') {
-    super('UNAUTHORIZED', message, 401);
-  }
-}
-
 export class ArcaRejectionError extends AppError {
   constructor(message: string, details?: Record<string, unknown>) {
     super('ARCA_REJECTION', message, 422, details);

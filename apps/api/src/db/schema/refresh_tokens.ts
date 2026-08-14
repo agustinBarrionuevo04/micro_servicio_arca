@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, timestamp } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 import { usuarios } from './usuarios.js';
 
 /**
@@ -30,18 +30,33 @@ import { usuarios } from './usuarios.js';
  * `onDelete: 'cascade'`: si se borra un usuario, sus refresh tokens no
  * tienen ningún sentido remanente (no hay a quién dejar loggeado).
  */
-export const refreshTokens = pgTable('refresh_tokens', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  usuarioId: uuid('usuario_id')
-    .notNull()
-    .references(() => usuarios.id, { onDelete: 'cascade' }),
-  tokenHash: varchar('token_hash', { length: 255 }).notNull(),
-  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-  // NULL = todavía vigente. Se setea al rotar (uso normal) o en un eventual
-  // logout explícito (no hay endpoint de logout en esta rama, ver PR).
-  revokedAt: timestamp('revoked_at', { withTimezone: true }),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-});
+export const refreshTokens = pgTable(
+  'refresh_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    usuarioId: uuid('usuario_id')
+      .notNull()
+      .references(() => usuarios.id, { onDelete: 'cascade' }),
+    tokenHash: varchar('token_hash', { length: 255 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    // NULL = todavía vigente. Se setea al rotar (uso normal) o en un eventual
+    // logout explícito (no hay endpoint de logout en esta rama, ver PR).
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    // `service.ts#refresh` busca por `tokenHash` en CADA llamada a
+    // POST /v1/auth/refresh (con SELECT ... FOR UPDATE, ver ese archivo) —
+    // sin este índice es un full table scan bajo un row lock, que empeora
+    // linealmente a medida que crece la tabla (no hay job de limpieza de
+    // filas revocadas/expiradas todavía). Único, no solo indexado: un
+    // SHA-256 duplicado no debería poder existir nunca (sería una colisión
+    // o un bug de generación), así que el índice único además actúa como
+    // chequeo de integridad, no solo de performance (hallazgo de code
+    // review, corroborado por varios ángulos de revisión independientes).
+    tokenHashIdx: uniqueIndex('refresh_tokens_token_hash_idx').on(table.tokenHash),
+  })
+);
 
 export type RefreshToken = typeof refreshTokens.$inferSelect;
 export type NewRefreshToken = typeof refreshTokens.$inferInsert;

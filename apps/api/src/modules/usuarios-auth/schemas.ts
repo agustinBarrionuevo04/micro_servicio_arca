@@ -12,7 +12,12 @@ const cuitSchema = z.string().regex(/^\d{2}-\d{8}-\d$/, 'CUIT debe tener formato
 
 export const loginSchema = z.object({
   cuit: cuitSchema,
-  password: z.string().min(1),
+  // `max(200)` acota el costo de `argon2.verify`, que corre siempre (incluso
+  // para un CUIT inexistente, ver DUMMY_PASSWORD_HASH en service.ts) — sin
+  // tope, un body con un password gigante es una palanca barata para
+  // amplificar el costo de CPU por request de este endpoint (hallazgo de
+  // code review). 200 es generoso para cualquier contraseña humana real.
+  password: z.string().min(1).max(200),
 });
 
 export type LoginRequestBody = z.infer<typeof loginSchema>;

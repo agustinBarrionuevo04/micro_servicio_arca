@@ -22,6 +22,13 @@
       "when": 1786562220729,
       "tag": "0002_chief_killer_shrike",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786675210832,
+      "tag": "0003_low_wrecking_crew",
+      "breakpoints": true
     }
   ]
 }

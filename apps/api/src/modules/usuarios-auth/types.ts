@@ -9,14 +9,38 @@
  * sea imposible de expresar en el tipo es más fuerte que confiar en que
  * cada handler futuro recuerde no serializar esos campos.
  */
-import type { Usuario } from '../../db/schema/index.js';
+import { usuarios, type Usuario } from '../../db/schema/index.js';
+
+/**
+ * Proyección de columnas "seguras" de `usuarios`, para usar directo en
+ * `.select(authenticatedUsuarioColumns)` en vez de traer la fila entera con
+ * `.select()` y descartar los campos sensibles después. Dos razones:
+ *
+ * 1. Eficiencia: `cert`/`key` son blobs cifrados — traerlos en cada request
+ *    autenticado (`middleware.ts`) para tirarlos sin usarlos es I/O
+ *    desperdiciado en el hot path del servicio.
+ * 2. Seguridad — allowlist, no denylist: la versión anterior traía la fila
+ *    completa y la pasaba por una función que *excluía* `passwordHash`/
+ *    `cert`/`key` por nombre. Eso falla *abierto*: una columna sensible
+ *    nueva que se agregue a `usuarios.ts` en el futuro (ej. un secreto de
+ *    2FA) viajaría por default a menos que alguien recuerde actualizar esa
+ *    lista de exclusión. Filtrar en el `SELECT` mismo falla *cerrado*: una
+ *    columna nueva simplemente no aparece hasta que alguien la agregue acá
+ *    a propósito (hallazgo de code review).
+ */
+export const authenticatedUsuarioColumns = {
+  id: usuarios.id,
+  cuit: usuarios.cuit,
+  razonSocial: usuarios.razonSocial,
+  domicilio: usuarios.domicilio,
+  condicionIva: usuarios.condicionIva,
+  puntoVenta: usuarios.puntoVenta,
+  ambiente: usuarios.ambiente,
+  createdAt: usuarios.createdAt,
+  updatedAt: usuarios.updatedAt,
+} as const;
 
 export type AuthenticatedUsuario = Omit<Usuario, 'passwordHash' | 'cert' | 'key'>;
-
-export function toAuthenticatedUsuario(usuario: Usuario): AuthenticatedUsuario {
-  const { passwordHash: _passwordHash, cert: _cert, key: _key, ...rest } = usuario;
-  return rest;
-}
 
 export interface LoginInput {
   cuit: string;
