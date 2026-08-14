@@ -1,155 +1,65 @@
-# Fase 3 — continuación pendiente
+# Fase 3 — Etapa 3 completa, esperando merge
 
-Este documento reemplaza a `FASE2.md` como punto de partida (esa fase ya se
-completó del todo). Leer junto con `PLAN.md` antes de seguir. No repetir acá
-lo que ya dice `FASE2.md` sobre instrucciones originales del usuario — siguen
-vigentes tal cual, léelas ahí si hace falta.
+Este documento reemplazó a `FASE2.md` y ahora refleja el cierre de Etapa 3.
+Leer junto con `PLAN.md`. Las instrucciones originales del usuario (branch
+naming, revisión cruzada obligatoria, patrón de `@arcasdk/core`) siguen
+vigentes tal cual — están en `FASE2.md` si hace falta repasarlas, no se
+repiten acá.
 
-## Por qué se cortó acá
+## Estado actual — Etapa 3 100% completa
 
-Se pidió cortar la ejecución a mitad de la segunda tanda de Etapa 3. Las 3
-ramas que faltaban (`usuarios-auth`, `arca-service-per-user`,
-`pdf-generation`) se lanzaron en paralelo y **ninguna llegó a commitear**,
-pero las tres tienen trabajo real sin guardar en sus worktrees (que siguen
-en disco, no se borraron). Ver el detalle de cada una más abajo — conviene
-retomarlas apuntando al worktree existente (mismo patrón que se usó para
-retomar `feature/pwa-scaffold` en la sesión anterior), no relanzarlas de
-cero.
+**9 PRs abiertos contra `develop`, todos revisados con `/code-review high
+<pr> --comment` y con los hallazgos reales ya corregidos y pusheados.**
+Nada mergeado todavía salvo lo que el usuario haya hecho manualmente
+(confirmar con `gh pr list --state all` antes de seguir).
 
-## Estado actual — Etapa 3 casi completa
-
-**6 PRs abiertos contra `develop`, todos revisados con `/code-review` y con
-los hallazgos ya corregidos y pusheados** — pendientes de que el usuario los
-mergee (nada mergeado todavía, confirmado):
-
-| PR | Rama | Estado |
-|----|------|--------|
+| PR | Rama | Notas |
+|----|------|-------|
 | [#1](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/1) | `fix/ci-workflow` | Revisado y corregido |
 | [#2](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/2) | `feature/monorepo-restructure` | Revisado y corregido |
 | [#3](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/3) | `feature/pwa-scaffold` | Revisado y corregido |
-| [#4](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/4) | `feature/db-schema-v2` | Revisado y corregido (migración verificada contra base vacía y con datos) |
-| [#5](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/5) | `feature/fiscal-rules-v2` | **Revisado y corregido en esta sesión** (faltaba validar `precioBase>0` y `ptoVta`) |
-| [#6](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/6) | `feature/precios-base-service` | **Revisado y corregido en esta sesión** (race condition con advisory lock, redondeo de precio, validación de fecha real en el seed script) |
+| [#4](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/4) | `feature/db-schema-v2` | Revisado y corregido. Migración verificada contra base vacía **y** contra base con datos del esquema viejo (usa un `TRUNCATE` documentado a propósito — el modelo de negocio cambió por completo, no hay migración de datos válida de las filas viejas). |
+| [#5](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/5) | `feature/fiscal-rules-v2` | Revisado y corregido (validación de `precioBase>0` y `ptoVta`) |
+| [#6](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/6) | `feature/precios-base-service` | Revisado y corregido (advisory lock por race condition, redondeo de precio, validación de fecha real) |
+| [#7](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/7) | `feature/arca-service-per-user` | Revisado y corregido (invalidación de cache documentada). **`@arcasdk/core` confirmado**: `production` es una propiedad de instancia, cada `new Arca(...)` es independiente — dos usuarios con distinto `ambiente` en el mismo proceso nunca se cruzan (ver el PR y el comentario en `services/arca/index.ts`). |
+| [#8](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/8) | `feature/usuarios-auth` | Revisado exhaustivamente (7 ángulos de review en paralelo) y corregido: índice único en `refresh_tokens.token_hash` (el hallazgo más corroborado, full table scan bajo lock), allowlist en vez de denylist para los campos seguros de usuario, `DUMMY_PASSWORD_HASH` calculado en vez de hardcodeado, límite de tamaño en `password`, `Bearer` case-insensitive, `security: []` en las rutas públicas, clase de error muerta eliminada. |
+| [#9](https://github.com/agustinBarrionuevo04/micro_servicio_arca/pull/9) | `feature/pdf-generation` | Revisado y corregido (timeout de 30s en la generación, comentario incorrecto sobre `Buffer.from`). **Puppeteer/PDF confirmado funcionando** end-to-end, incluso en Docker real — necesitó un patch (`patches/@arcasdk__pdf@0.2.0.patch`, agrega `--no-sandbox`) documentado en el código y en el `Dockerfile`. **Gap de auth deliberadamente sin cerrar y marcado como bloqueante para producción** — la ruta `GET /v1/facturas/:id/pdf` no tiene JWT todavía porque se construyó en paralelo a `usuarios-auth`; hay que cerrarlo en `feature/facturas-service-v2` (Etapa 4). |
 
-**Ya no queda ningún PR con hallazgos de review pendientes de aplicar.** A
-diferencia de `FASE2.md`, acá no hace falta ningún paso 0 de limpieza antes
-de seguir — se puede ir directo a terminar las 3 ramas que faltan.
+**Ningún PR tiene hallazgos de review pendientes de aplicar.**
 
-## Las 3 ramas que faltan de Etapa 3 — retomar, no relanzar
+## Antes de arrancar Etapa 3b
 
-Todas basadas en `origin/feature/db-schema-v2` (commit `8647f2a`) o
-`origin/develop` si para cuando se retome esto el usuario ya mergeó ese PR.
+1. Confirmar si el usuario mergeó algo (`gh pr list --state all`). Si mergeó
+   `feature/db-schema-v2` (#4) a `develop`, conviene mergear también #5-#9
+   en orden antes de seguir, o al menos rebasar las próximas ramas contra
+   `develop` en vez de `feature/db-schema-v2` directo.
+2. **Recordar el gap de auth de PR #9** cuando se arranque
+   `feature/facturas-service-v2` (Etapa 4): la ruta del PDF necesita el
+   middleware `authenticate` de `feature/usuarios-auth` (PR #8) wireado.
 
-### `feature/usuarios-auth` — ~30-40% hecho
-Worktree: `/home/agustin/Documentos/proyectos/micro_servicio_arca/.claude/worktrees/agent-a484c69c91f1f4b6f`
-(rama local `feature/usuarios-auth` ya creada ahí, sobre `8647f2a`).
+## Lo que sigue — Etapa 3b, 4, 5, 6 (sin cambios respecto a `PLAN.md`)
 
-Ya hecho (sin commitear):
-- Migración de Drizzle generada para `refresh_tokens`
-  (`apps/api/src/db/migrations/0002_chief_killer_shrike.sql` +
-  `meta/0002_snapshot.json`, ambos **untracked**).
-- `apps/api/src/config/env.ts` + `.env.example`: agregado `JWT_SECRET`.
-- `apps/api/src/db/schema/index.ts`: barrel actualizado (probablemente ya
-  exporta `refresh_tokens.ts` — confirmar que ese archivo de schema exista,
-  puede haber quedado a mitad de camino).
-- `apps/api/src/errors/index.ts`: +45 líneas, nuevas clases de error
-  (`InvalidCredentialsError`, etc. — confirmar nombres exactos).
-- `apps/api/package.json` + `pnpm-lock.yaml`: `jsonwebtoken` agregado.
+### Etapa 3b — 2 ramas en paralelo, dependen solo de `feature/pwa-scaffold` (PR #3, ya listo)
+- `feature/pwa-onboarding-auth-screens` — alta guiada (sin jerga técnica) + login, contra el cliente mock.
+- `feature/pwa-factura-flows` — carga de unidades, preview, confirmar/emitir, historial, compartir PDF, contra el cliente mock.
 
-Falta (el agente estaba por acá cuando se cortó, mensaje: *"Now let's create
-the module files. Starting with `passwords.ts`"*):
-- El módulo de auth en sí: `passwords.ts` (hash/verify con argon2), la
-  lógica de JWT (sign/verify, rotación de refresh token), las rutas
-  `POST /v1/auth/login` y `POST /v1/auth/refresh`, el middleware que
-  resuelve `request.usuario`.
-- Registrar las rutas en `apps/api/src/routes/index.ts` (tiene un TODO
-  marcando dónde).
-- Tests (unitarios de los helpers, integración del flujo completo).
-- Agregar el path del módulo a `coverage.include` en `vitest.config.ts`.
-- Confirmar `pnpm build` y `pnpm test` en verde, commit, push, PR contra
-  `develop`.
+### Etapa 4 — 2 ramas secuenciales, integran Etapa 3
+- `feature/usuarios-onboarding` — alta self-service, valida el certificado contra ARCA antes de persistir (usa `getArcaClientForUsuario` de PR #7), siembra `contadores`. Depende de `usuarios-auth` (#8) y `arca-service-per-user` (#7).
+- `feature/facturas-service-v2` — orquesta `precios-base` (#6) → `fiscal-rules-v2` (#5) → `arca-service-per-user` (#7) → `pdf` (#9), idempotencia natural `(usuario_id, periodo)`. **Acá se cierra el gap de auth del PDF** (ver arriba).
 
-### `feature/arca-service-per-user` — ~85-90% hecho, el más cerca de terminar
-Worktree: `/home/agustin/Documentos/proyectos/micro_servicio_arca/.claude/worktrees/agent-a5b54df9e900bda97`
-(rama local `feature/arca-service-per-user` ya creada ahí, sobre `8647f2a`).
+### Etapa 5
+- `feature/pwa-api-integration` — reemplaza el mock del frontend por el API real, prueba e2e manual contra homologación.
 
-Ya hecho (sin commitear):
-- `apps/api/src/services/arca/index.ts` (+42 líneas) y `types.ts` (+8
-  líneas): `ambiente` por usuario en `ArcaCredentials`, cache por
-  `usuarioId`, rename de `getArcaClientForTenant` → `...ForUsuario` (a
-  confirmar el nombre final).
-- `apps/api/src/routes/health.ts` (+26/-4 líneas): `/v1/arca/status`
-  adaptado.
-- `apps/api/src/config/env.ts` + `.env.example`: probablemente ya sacó
-  `ARCA_MODE` (confirmar).
-- `apps/api/tests/unit/arca.test.ts` (**untracked**, nuevo) — debería tener
-  el test de regresión de aislamiento entre ambientes, que es el
-  entregable más importante de esta rama.
-- `apps/api/vitest.config.ts` (+25/-4): agregado `services/arca` a
-  `coverage.include`.
-
-Falta (el agente estaba por acá cuando se cortó, mensaje: *"Now let's
-verify coverage thresholds pass for the `services/arca` include"*):
-- Correr `pnpm test:coverage` y ajustar si no llega al umbral.
-- **Confirmar que el PR body vaya a documentar explícitamente qué encontró
-  sobre cómo `@arcasdk/core` elige host WSAA/WSFEV1 según el flag
-  `production`** — esto era un requisito explícito del prompt original, no
-  asumir que ya está escrito en ningún lado, revisar el código para ver si
-  dejó un comentario con el hallazgo.
-- Commit, push, PR contra `develop`.
-
-### `feature/pdf-generation` — ~15-20% hecho, encontró un obstáculo real de entorno
-Worktree: `/home/agustin/Documentos/proyectos/micro_servicio_arca/.claude/worktrees/agent-a36cb39773634dc97`
-(rama local `feature/pdf-generation` ya creada ahí, sobre `8647f2a`).
-
-Ya hecho (sin commitear):
-- `@arcasdk/pdf` agregado a `apps/api/package.json` (`pnpm-lock.yaml` con
-  +1229 líneas de resolución de dependencias — Puppeteer trae bastante).
-- `pnpm-workspace.yaml`: agregó un campo de `patches` (**nuevo**, no existía
-  antes).
-- Un directorio `patches/` **untracked** con al menos un patch ya aplicado
-  ("Patch committed correctly" en el último mensaje del agente antes de
-  cortarlo) — **importante**: esto sugiere que Puppeteer/Chromium necesitó
-  un patch para funcionar en este entorno sandboxeado. Revisar qué patch es
-  exactamente antes de seguir, y si el mismo problema va a aparecer en CI/
-  producción (el Dockerfile que pide el plan todavía no se escribió).
-
-Falta (mensaje del agente al cortarlo: *"Now let's re-run the manual
-generation test to confirm it works"*):
-- Confirmar que la generación de PDF realmente funciona en este entorno
-  después del patch (el agente estaba en eso cuando se cortó).
-- Todo el código en sí: `apps/api/src/services/pdf/index.ts`
-  (`generateFacturaPdf`), la ruta `GET /v1/facturas/:id/pdf` con el stub de
-  auth documentado como bloqueante, el `Dockerfile` con Chromium headless.
-- Tests, agregar `services/pdf` a `coverage.include`.
-- Commit, push, PR contra `develop`, con el patch de Puppeteer explicado en
-  el body si terminó siendo necesario.
+### Etapa 6
+- `feature/readme-rewrite` — README del producto real (el actual sigue describiendo el viejo API B2B genérico).
+- `fix/final-cleanup` — grep de referencias muertas, corrida final de suite + coverage.
 
 ## Cómo retomar
 
-1. Ver si el usuario mergeó algún PR (`gh pr list --state all`). Si mergeó
-   `feature/db-schema-v2` a `develop`, más fácil rebasar las 3 ramas de
-   arriba contra `develop` antes de seguir; si no, seguir tal como están
-   (sobre `feature/db-schema-v2` directo).
-2. Para cada una de las 3 ramas de arriba: lanzar un agente **sin
-   isolation: worktree**, apuntado directo al path del worktree existente
-   (mismo patrón que se usó para retomar `feature/pwa-scaffold` en la
-   sesión anterior — instruirlo a `cd` ahí primero y correr `git status`/
-   `git diff` antes de tocar nada, para que entienda qué ya está hecho
-   antes de continuar). No relanzar con `isolation: worktree` de cero,
-   sería tirar el trabajo ya hecho.
-3. Cuando cada una termine y abra PR: `/code-review high <pr> --comment`,
-   aplicar los hallazgos reales directamente sobre la rama, push, recién
-   ahí avisarle al usuario que está lista.
-4. Con las 5 ramas de Etapa 3 completas y con PR, seguir con Etapa 3b
-   (`feature/pwa-onboarding-auth-screens`, `feature/pwa-factura-flows` —
-   dependen solo de `feature/pwa-scaffold`, PR #3, que ya está listo) y
-   después Etapa 4, 5, 6 en orden — ver `PLAN.md` para el detalle completo
-   de cada una.
-
-## Ramas restantes después de Etapa 3 (sin cambios respecto a `PLAN.md`)
-
-- Etapa 3b: `feature/pwa-onboarding-auth-screens`, `feature/pwa-factura-flows`.
-- Etapa 4: `feature/usuarios-onboarding`, `feature/facturas-service-v2`.
-- Etapa 5: `feature/pwa-api-integration`.
-- Etapa 6: `feature/readme-rewrite`, `fix/final-cleanup`.
+Lanzar las 2 ramas de Etapa 3b en paralelo (isolation: worktree, cada una
+basada en `origin/feature/pwa-scaffold` o `origin/develop` si ese PR ya
+mergeó), con el mismo nivel de detalle de contexto que se usó para las
+ramas de Etapa 3 — eso es lo que permitió que salieran bien documentadas y
+casi sin hallazgos de review desde el primer intento. Cuando cada una
+termine: `/code-review high <pr> --comment`, aplicar los hallazgos reales,
+push, y recién ahí avisar que está lista para mergear.
