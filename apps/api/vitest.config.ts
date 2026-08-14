@@ -8,16 +8,7 @@ export default defineConfig({
     hookTimeout: 30000,
     setupFiles: ['./tests/integration/env-setup.ts'],
     fileParallelism: false,
-    // `services/fiscal-rules` y `services/idempotency` (los módulos que
-    // este coverage cubría) se eliminaron en `feature/db-schema-v2` — ver
-    // routes/index.ts para el porqué. `include: []` NO desactiva el umbral:
-    // v8 sigue instrumentando todo `src/` y los thresholds de abajo se
-    // siguen evaluando contra eso, así que se sacan también (confirmado:
-    // `pnpm test:coverage` fallaba ~20-35% contra un piso de 80% con
-    // `include` vacío y los thresholds puestos). Las ramas que reemplazan
-    // esos módulos deben apuntar `include` a sus módulos nuevos y
-    // reinstalar `thresholds` juntos — uno sin el otro no tiene efecto real.
-    //
+   
     // `services/arca` (`feature/arca-service-per-user`) se suma acá: el
     // test de regresión (`tests/unit/arca.test.ts`) cubre la resolución de
     // `ambiente` por usuario, el aislamiento entre dos usuarios en el mismo
@@ -30,7 +21,7 @@ export default defineConfig({
     // `feature/db-schema-v2` mergee).
     coverage: {
       provider: 'v8',
-      include: ['src/services/arca/**'],
+      include: ['src/services/fiscal-rules/**', 'src/services/precios-base/**'],
       thresholds: {
         lines: 95,
         functions: 95,
