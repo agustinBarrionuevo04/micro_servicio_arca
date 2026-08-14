@@ -137,6 +137,19 @@ export function buildInvoiceData(factura: Factura, usuario: Usuario): InvoiceDat
   };
 }
 
+// Cada llamada a `generate()` lanza un proceso Chromium nuevo (`@arcasdk/pdf`
+// no pooléa instancias) sin ningún timeout propio — si el `launch()` se
+// cuelga (recursos del contenedor agotados, un problema del entorno como el
+// que motivó el patch de sandbox documentado arriba), la request queda
+// colgada indefinidamente en vez de fallar con un error claro. La ruta
+// `GET /v1/facturas/:id/pdf` todavía no tiene auth (ver `routes/facturas.ts`
+// y el PR — bloqueante para producción), así que hoy nada evita que muchas
+// requests concurrentes disparen muchos Chromium en paralelo; un límite de
+// concurrencia real es trabajo de la rama que cierre ese gap de auth. Este
+// timeout es la mitigación mínima independiente de eso: ninguna generación
+// individual debería poder colgarse para siempre.
+const GENERATE_TIMEOUT_MS = 30_000;
+
 /**
  * `generateFacturaPdf`: única función pública de este módulo. Guarda de
  * negocio central — solo una factura `emitida` (con CAE real de ARCA) puede
@@ -149,7 +162,15 @@ export async function generateFacturaPdf(factura: Factura, usuario: Usuario): Pr
 
   const data = buildInvoiceData(factura, usuario);
   const generator = new InvoicePdfGenerator();
-  const result = await generator.generate(data);
+  const result = await Promise.race([
+    generator.generate(data),
+    new Promise<never>((_resolve, reject) =>
+      setTimeout(
+        () => reject(new InternalArcaError(`Generación de PDF superó ${GENERATE_TIMEOUT_MS}ms (factura ${factura.id})`)),
+        GENERATE_TIMEOUT_MS
+      )
+    ),
+  ]);
 
   // `@arcasdk/pdf`'s `.d.ts` declara `generate(): Promise<Buffer>`, pero en
   // runtime devuelve un `Uint8Array` plano (confirmado corriendo el
@@ -159,8 +180,10 @@ export async function generateFacturaPdf(factura: Factura, usuario: Usuario): Pr
   // `Uint8Array` funciona para casi todo (`reply.send`, escribir a disco),
   // pero no es un `Buffer` real (`Buffer.isBuffer()` da `false`), así que se
   // normaliza acá para que esta función cumpla su firma declarada
-  // (`Promise<Buffer>`) de verdad, no solo de nombre. `Buffer.from(view)` no
-  // copia si `view` ya es un `Buffer`, así que este wrap es gratis en el
-  // caso en que la librería alguna vez corrija su propio tipo.
+  // (`Promise<Buffer>`) de verdad, no solo de nombre. Nota: `Buffer.from(view)`
+  // SIEMPRE copia los bytes (incluso si `view` ya fuera un `Buffer`) — no es
+  // gratis, pero el PDF generado acá es chico (una factura, no un archivo
+  // masivo) así que el costo de la copia es despreciable frente al de
+  // renderizar el PDF con Chromium.
   return Buffer.from(result);
 }
