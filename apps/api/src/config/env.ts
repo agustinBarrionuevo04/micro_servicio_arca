@@ -27,7 +27,10 @@ export const envSchema = z.object({
   // Mismo criterio que `ENCRYPTION_KEY`: fallar rápido al levantar el
   // proceso, no en el primer login real.
   JWT_SECRET: z.string().min(32, 'debe tener al menos 32 caracteres'),
-  ARCA_MODE: z.enum(['homologacion', 'produccion']).default('homologacion'),
+  // Ya no existe `ARCA_MODE` acá: el ambiente de ARCA (homologación/
+  // producción) se resuelve por usuario (columna `usuarios.ambiente`), no
+  // como una variable de entorno global — ver `services/arca/index.ts` y
+  // PLAN.md "Seguridad (no negociable)".
   RATE_LIMIT_MAX: z.coerce.number().default(100),
   RATE_LIMIT_TIME_WINDOW: z.coerce.number().default(60000),
 });

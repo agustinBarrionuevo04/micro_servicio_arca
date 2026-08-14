@@ -11,7 +11,8 @@
     "test:coverage": "vitest run --coverage",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file=.env src/db/migrate.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "seed:precio-base": "tsx --env-file=.env scripts/seed-precio-base.ts"
   },
   "dependencies": {
     "@arcasdk/core": "^1.0.0",
