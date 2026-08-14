@@ -3,6 +3,12 @@ import { envSchema } from '../../src/config/env.js';
 
 const baseEnv = {
   DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/arca_billing',
+  ENCRYPTION_KEY: 'a'.repeat(64),
+  // Irrelevante para los tests de ENCRYPTION_KEY, pero requerido por
+  // envSchema desde que se agregó JWT_SECRET (ver `src/config/env.ts`,
+  // `feature/usuarios-auth`) — sin esto, safeParse fallaría por un motivo
+  // distinto al que cada test intenta probar.
+  JWT_SECRET: 'a'.repeat(32),
 };
 
 describe('envSchema - ENCRYPTION_KEY', () => {
@@ -35,6 +41,38 @@ describe('envSchema - ENCRYPTION_KEY', () => {
       ...baseEnv,
       ENCRYPTION_KEY: 'a'.repeat(32),
     });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('envSchema - JWT_SECRET', () => {
+  it('acepta un secret de exactamente 32 caracteres', () => {
+    const result = envSchema.safeParse({
+      ...baseEnv,
+      JWT_SECRET: 'a'.repeat(32),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('acepta un secret más largo que 32 caracteres', () => {
+    const result = envSchema.safeParse({
+      ...baseEnv,
+      JWT_SECRET: 'a'.repeat(64),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rechaza un secret más corto que 32 caracteres', () => {
+    const result = envSchema.safeParse({
+      ...baseEnv,
+      JWT_SECRET: 'a'.repeat(31),
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rechaza un secret ausente', () => {
+    const { JWT_SECRET: _omit, ...envSinJwtSecret } = baseEnv;
+    const result = envSchema.safeParse(envSinJwtSecret);
     expect(result.success).toBe(false);
   });
 });
