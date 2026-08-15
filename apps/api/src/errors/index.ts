@@ -120,8 +120,10 @@ export class InvalidRefreshTokenError extends AppError {
 export class InvalidTokenError extends AppError {
   constructor(message = 'Invalid or expired token') {
     super('INVALID_TOKEN', message, 401);
+  }
+}
 
- /*
+/*
  * No existe una fila de `precios_base` vigente para el período pedido —
  * un "agujero" en el historial de precios (p. ej. alguien olvidó sembrar
  * el precio de un mes, ver PLAN.md "precios_base: sin UI de
