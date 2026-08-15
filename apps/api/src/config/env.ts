@@ -18,7 +18,19 @@ export const envSchema = z.object({
   // clave más corta, rompiendo createCipheriv recién en el primer uso real
   // (crear un tenant) en vez de fallar rápido al arrancar el proceso.
   ENCRYPTION_KEY: z.string().regex(/^[0-9a-fA-F]{64}$/, 'debe ser hex de 64 caracteres (32 bytes)'),
-  ARCA_MODE: z.enum(['homologacion', 'produccion']).default('homologacion'),
+  // Firma HS256 de los access tokens (ver `modules/usuarios-auth/jwt.ts`).
+  // Se exige un mínimo de 32 caracteres (no un formato hex estricto como
+  // `ENCRYPTION_KEY`, porque HS256 acepta cualquier secreto de largo
+  // suficiente, no una clave de tamaño fijo) para que un valor corto o de
+  // relleno tipo "secret" no pase la validación de arranque y solo se
+  // note recién cuando alguien intente falsificar un token en producción.
+  // Mismo criterio que `ENCRYPTION_KEY`: fallar rápido al levantar el
+  // proceso, no en el primer login real.
+  JWT_SECRET: z.string().min(32, 'debe tener al menos 32 caracteres'),
+  // Ya no existe `ARCA_MODE` acá: el ambiente de ARCA (homologación/
+  // producción) se resuelve por usuario (columna `usuarios.ambiente`), no
+  // como una variable de entorno global — ver `services/arca/index.ts` y
+  // PLAN.md "Seguridad (no negociable)".
   RATE_LIMIT_MAX: z.coerce.number().default(100),
   RATE_LIMIT_TIME_WINDOW: z.coerce.number().default(60000),
 });

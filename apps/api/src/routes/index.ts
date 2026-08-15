@@ -1,10 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { registerHealthRoutes } from './health.js';
 import { registerFacturaRoutes } from './facturas.js';
+import { registerUsuariosAuthRoutes } from '../modules/usuarios-auth/index.js';
 
-// TODO(feature/usuarios-auth): reincorporar el login CUIT+contraseña
-// (reemplazo de `modules/auth`, que era API-key B2B — no aplica a este
-// producto, ver PLAN.md "Qué se reemplaza").
 // TODO(feature/usuarios-onboarding): reincorporar el alta self-service de
 // usuarios (reemplazo de `modules/tenants`, que era un endpoint admin de
 // alta de tenants B2B).
@@ -29,4 +27,5 @@ import { registerFacturaRoutes } from './facturas.js';
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   await registerHealthRoutes(app);
   await registerFacturaRoutes(app);
+  await registerUsuariosAuthRoutes(app);
 }

@@ -11,7 +11,8 @@
     "test:coverage": "vitest run --coverage",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file=.env src/db/migrate.ts",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "seed:precio-base": "tsx --env-file=.env scripts/seed-precio-base.ts"
   },
   "dependencies": {
     "@arcasdk/core": "^1.0.0",
@@ -23,10 +24,12 @@
     "drizzle-orm": "^0.45.2",
     "fastify": "^4.28.0",
     "fastify-type-provider-zod": "^2.0.0",
+    "jsonwebtoken": "^9.0.3",
     "pg": "^8.12.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.14.0",
     "@types/pg": "^8.11.6",
     "@vitest/coverage-v8": "2.1.9",

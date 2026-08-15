@@ -1,8 +1,16 @@
+import type { ArcaAmbiente } from '../../db/schema/enums.js';
+
 /** Formas de request/response propias de nuestro dominio (camelCase), independientes del SDK de ARCA. */
 export interface ArcaCredentials {
   cert: string;
   key: string;
   cuit: string;
+  // Resuelto por usuario (columna `usuarios.ambiente`), nunca desde una
+  // variable de entorno global — ver `createArcaClient` en `index.ts` y
+  // PLAN.md "Seguridad (no negociable)". Reusamos el tipo de
+  // `db/schema/enums.ts` en vez de redefinirlo acá para que no puedan
+  // divergir.
+  ambiente: ArcaAmbiente;
 }
 
 export interface ArcaFacturaRequest {
