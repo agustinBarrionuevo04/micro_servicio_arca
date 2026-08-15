@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { registerHealthRoutes } from './health.js';
+import { registerFacturaRoutes } from './facturas.js';
 import { registerUsuariosAuthRoutes } from '../modules/usuarios-auth/index.js';
 
 // TODO(feature/usuarios-onboarding): reincorporar el alta self-service de
@@ -9,7 +10,11 @@ import { registerUsuariosAuthRoutes } from '../modules/usuarios-auth/index.js';
 // (preview/crear/listar/detalle) sobre el modelo nuevo
 // (unidades × precio_base_vigente(periodo)), reemplazo de `modules/facturas`
 // que modelaba ventas con items arbitrarios — incompatible con el dominio
-// nuevo, no un rename mecánico.
+// nuevo, no un rename mecánico. `registerFacturaRoutes` (de esta rama,
+// `feature/pdf-generation`) solo trae `GET /v1/facturas/:id/pdf`, que no
+// depende de esa orquestación — cuando `facturas-service-v2` aterrice, sus
+// rutas deberían sumarse al mismo `facturas.ts` en vez de duplicar el
+// archivo.
 //
 // `modules/auth`, `modules/tenants`, `modules/facturas`,
 // `services/fiscal-rules` y `services/idempotency` se eliminaron en esta
@@ -21,5 +26,6 @@ import { registerUsuariosAuthRoutes } from '../modules/usuarios-auth/index.js';
 // shims habría significado fingir una lógica de negocio que ya no aplica.
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   await registerHealthRoutes(app);
+  await registerFacturaRoutes(app);
   await registerUsuariosAuthRoutes(app);
 }

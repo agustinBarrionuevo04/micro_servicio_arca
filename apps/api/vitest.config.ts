@@ -16,6 +16,20 @@ export default defineConfig({
     // siguen evaluando contra eso, así que se sacan también (confirmado:
     // `pnpm test:coverage` fallaba ~20-35% contra un piso de 80% con
     // `include` vacío y los thresholds puestos). Las ramas que reemplazan
+
+    // esos módulos (feature/fiscal-rules-v2, y la idempotencia por clave
+    // natural que absorbe feature/facturas-service-v2) deben apuntar
+    // `include` a sus módulos nuevos y reinstalar `thresholds` juntos —
+    // uno sin el otro no tiene efecto real.
+    //
+    // `feature/pdf-generation` suma `src/services/pdf/**` y
+    // `src/routes/facturas.ts`: tanto `buildInvoiceData`/`generateFacturaPdf`
+    // (mapeo de datos + guarda de `estado`) como la ruta HTTP tienen
+    // cobertura de test real (ver `tests/integration/services/pdf.test.ts` y
+    // `tests/integration/routes/facturas-pdf.test.ts`), así que se suman
+    // ambos paths al `include` con el mismo umbral que ya usan las demás
+    // ramas de Etapa 3 (ver `origin/feature/precios-base-service`).
+    
     // esos módulos deben apuntar `include` a sus módulos nuevos y
     // reinstalar `thresholds` juntos — uno sin el otro no tiene efecto real.
     //
@@ -39,7 +53,8 @@ export default defineConfig({
     // `feature/db-schema-v2` mergee).
     coverage: {
       provider: 'v8',
-      include: ['src/services/fiscal-rules/**', 'src/services/precios-base/**','src/modules/usuarios-auth/**'],
+      include: ['src/services/fiscal-rules/**', 'src/services/precios-base/**','src/modules/usuarios-auth/**',
+                'src/services/pdf/**', 'src/routes/facturas.ts'],
       thresholds: {
         lines: 95,
         functions: 95,
